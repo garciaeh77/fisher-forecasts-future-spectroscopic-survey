@@ -1,0 +1,399 @@
+\documentclass[11pt]{article}
+
+\usepackage{amsmath,amssymb}
+\usepackage{booktabs,array}
+\usepackage{geometry}
+\usepackage{hyperref}
+\usepackage[numbers,sort&compress]{natbib}
+\usepackage{xurl}
+
+\geometry{margin=1in}
+\hypersetup{colorlinks=true,linkcolor=blue,citecolor=blue,urlcolor=blue}
+
+\title{Lyman-alpha $P_{1\mathrm{D}}$ calculator:\\
+stage 1 before the meeting, stage 2 after it}
+\author{Helena}
+\date{30 October 2026}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+This note is the record of the analytic and skewer pipelines.
+The repository is
+\path{garciaeh77/fisher-forecasts-future-spectroscopic-survey}.
+Stage~1 is the calculator finished before the 13~October meeting:
+inputs $n_s$, $A_s$, and $P_\mathrm{CDM}$, output $P_{1\mathrm{D}}(k_\parallel,z)$.
+Stage~2 is the list from that meeting. Part of it has been coded and plotted.
+The three-dimensional flux measurement, the run at $z\sim 5$ out to
+$0.2\,\mathrm{s\,km}^{-1}$, and the comparison to the Arinyo-i-Prats model
+have not been run. The bibliography uses INSPIRE keys and is the file
+\texttt{references.bib} in this directory.
+\end{abstract}
+
+\section{Stage 1: before the meeting}
+\label{sec:stage1}
+
+\subsection{Step 0: the task}
+
+The assigned calculator takes $n_s$, $A_s$, and a cold-dark-matter spectrum and returns the one-dimensional Lyman-alpha flux power. The wavenumber of that power is in $\mathrm{s\,km}^{-1}$ and the power is in $\mathrm{km\,s}^{-1}$, which is how a forest spectrum is measured. The cross-power $P_x$, the covariance, and the Fisher matrix were left for a later stage.
+
+One evaluation is at one redshift. Every check uses the same fiducial point,
+\begin{equation}
+\begin{aligned}
+\Omega_m &= 0.31, &
+\Omega_b &= 0.049, &
+h &= 0.67, \\
+n_s &= 0.965, &
+A_s &= 2.1\times 10^{-9}, &
+z &= 3.
+\end{aligned}
+\end{equation}
+These are a rounded Planck-like cosmology, not a fit. They are fixed so that a change in one input can be read off the plots. The code is the package \path{p1d/}. The original Kaiser and skewer functions are \path{p1d_skm} and \path{run_fgpa_skewers}.
+
+Two flux models share the same matter spectrum, on purpose. The Kaiser path is smooth in $n_s$ and $A_s$, so a later Fisher matrix can differentiate it. The skewer path builds an optical depth and checks the shape. They are not required to have the same amplitude.
+
+\subsection{The matter spectrum, and why this form}
+
+The default three-dimensional spectrum is the Eisenstein and Hu fitting formula \cite{Eisenstein:1997ik}. Wavenumbers inside the transfer function are in $\mathrm{Mpc}^{-1}$. The fit is normalised to $T(k\to 0)=1$ and includes the baryon acoustic oscillations. It is a closed form, so $n_s$ and $A_s$ can be changed without calling a Boltzmann code. It is an approximation to that code: on a direct comparison the median ratio to CAMB, from $10^{-3}$ to $10\,h\,\mathrm{Mpc}^{-1}$ at $z=0$, was about $1.01$.
+
+The linear power in $\mathrm{Mpc}^{3}$ is
+\begin{equation}
+\label{eq:pcdm}
+P(k,z)
+=
+\frac{8\pi^{2}}{25}
+\frac{A_s}{\Omega_m^{2} H_0^{4}}
+\left(\frac{k}{k_\mathrm{pivot}}\right)^{n_s-1}
+k\,T(k)^{2}\,D(z)^{2},
+\end{equation}
+with the primordial pivot $k_\mathrm{pivot}=0.05\,\mathrm{Mpc}^{-1}$ and
+$H_0=100h/299792.458$ in $\mathrm{Mpc}^{-1}$.
+Multiplication by $h^{3}$ converts this to $(\mathrm{Mpc}/h)^{3}$.
+The growth factor solves the linear growth equation in a flat universe and is normalised so that $D(a)\to a$ deep in matter domination. It is not normalised to $D(0)=1$. Neutrino masses are not included. This lives in \path{p1d/eisenstein_hu.py}, in \path{transfer}, \path{growth}, and \path{linear_matter_power}.
+
+A two-column file can replace Eq.~\eqref{eq:pcdm}. Column one is $k$ in $h\,\mathrm{Mpc}^{-1}$. Column two is the linear $P(k)$ in $(\mathrm{Mpc}/h)^{3}$ at one redshift, already containing the fiducial $n_s$ and $A_s$. The reader does not extrapolate. A later change of amplitude, tilt, or redshift only rescales the file,
+\begin{equation}
+\label{eq:table}
+P(k)
+=
+P_\mathrm{fid}(k)\,
+\frac{A_s}{A_{s,\mathrm{fid}}}\,
+\left(\frac{k}{k_p}\right)^{n_s-n_{s,\mathrm{fid}}}\,
+\left(\frac{D(z)}{D(z_\mathrm{fid})}\right)^{2},
+\end{equation}
+with $k_p=0.05/h$ in $h\,\mathrm{Mpc}^{-1}$. CLASS files written in $\mathrm{Mpc}^{-1}$ and $\mathrm{Mpc}^{3}$ have to be converted by $k_h=k/h$ and $P_h=P\,h^{3}$ before reading. The table must be the linear spectrum. The code is \path{load_power_table} and \path{TabulatedMatterPower} in \path{p1d/matter_table.py}.
+
+The task also asked for an $\alpha\beta\gamma\delta$ shape. It is a smooth bend on the Eisenstein--Hu spectrum,
+\begin{equation}
+\label{eq:abgd}
+P(k)=P_\mathrm{EH}(k)\,
+\exp(\alpha L+\beta L^{2}+\gamma L^{3}+\delta L^{4}),
+\qquad
+L=\ln(k/k_p),
+\end{equation}
+with $k_p=1\,h\,\mathrm{Mpc}^{-1}$. At that pivot the exponential is $1$, so the amplitude is still the Eisenstein--Hu amplitude. All four coefficients set to zero returns Eq.~\eqref{eq:pcdm} exactly. These coefficients are not the IGM temperature--density index. The code is \path{p1d/abgd.py}.
+
+\subsection{Analytic flux: Kaiser, and why these numbers}
+
+On large scales the forest is treated as a linearly biased tracer, with coherent peculiar velocities. Kaiser derived that factor for galaxies \cite{Kaiser:1987qv}. McDonald wrote the same idea for the forest \cite{McDonald:2001fe}. The three-dimensional flux power in \path{p1d/flux.py} is
+\begin{equation}
+\label{eq:kaiser}
+P_F(k,\mu)
+=
+b_F^{2}\,(1+\beta_F\mu^{2})^{2}\,P_\mathrm{CDM}(k),
+\qquad
+\mu=k_\parallel/k.
+\end{equation}
+The numbers in the code are fixed,
+\begin{equation}
+b_F=-0.14, \qquad \beta_F=1.4.
+\end{equation}
+$b_F$ is negative because a denser patch absorbs more and transmits less. In Kaiser's paper $\beta=f/b$. The code does not compute that ratio. The pair is a round stand-in for the large-scale forest bias. Early DESI data give $b_{\mathrm{Ly}\alpha}=-0.134\pm 0.009$ and $\beta_{\mathrm{Ly}\alpha}=1.41^{+0.12}_{-0.15}$ \cite{Gordon:2023dua}. The eBOSS and DESI analyses also let the bias evolve as $(1+z)^{2.9}$ \cite{eBOSS:2020tmo}. That evolution is not in this calculator: both numbers are the same at every redshift. McDonald's extra factors for nonlinear growth, pressure, and nonlinear velocities are not in Eq.~\eqref{eq:kaiser} either. The emulator file \path{linear_theory.py} uses $-0.14$ inside a different formula, $(b+(1+\mu^{2})\beta_\eta)^{2}$ with $\beta_\eta=-0.2$, and that file says it is for testing. So $-0.14$ was not derived from that equation. It is a round version of the measured large-scale bias.
+
+A forest spectrum sees only the line of sight, so perpendicular modes are integrated out,
+\begin{equation}
+\label{eq:p1d}
+P_{1\mathrm{D}}(k_\parallel)
+=
+\int_{k_\parallel}^{k_\mathrm{max}}
+\frac{k\,\mathrm{d}k}{2\pi}\,
+P_F\!\left(k,\mu=\frac{k_\parallel}{k}\right),
+\end{equation}
+with a numerical cutoff $k_\mathrm{max}=30\,h\,\mathrm{Mpc}^{-1}$ and 800 logarithmic samples. The integral starts at $k_\parallel$ because a three-dimensional mode cannot contribute to a line-of-sight wavenumber larger than its own $k$. The cutoff is past the usual forest range, $10^{-3}$ to $0.02\,\mathrm{s\,km}^{-1}$, because small-scale power still adds into a lower $k_\parallel$. It is not a measured scale. Gas pressure removes power around $10$--$20\,h\,\mathrm{Mpc}^{-1}$ \cite{McDonald:2001fe}, so the unsmoothed integral keeps power the gas does not have.
+
+Forest units use
+\begin{equation}
+\label{eq:units}
+\frac{\mathrm{d}v}{\mathrm{d}\chi}
+=
+\frac{H(z)}{(1+z)\,h},
+\qquad
+H(z)=100\,h\sqrt{\Omega_m(1+z)^{3}+1-\Omega_m},
+\end{equation}
+in $\mathrm{km\,s}^{-1}$ per $\mathrm{Mpc}/h$. Then $k_h=k_{\mathrm{s/km}}\,\mathrm{d}v/\mathrm{d}\chi$ and the one-dimensional power in $\mathrm{km\,s}^{-1}$ is the comoving power times the same factor. At the fiducial $z=3$ this factor is about $113\,\mathrm{km\,s}^{-1}$ per $\mathrm{Mpc}/h$, so $0.001$ to $0.02\,\mathrm{s\,km}^{-1}$ is about $0.11$ to $2.3\,h\,\mathrm{Mpc}^{-1}$.
+
+Equation~\eqref{eq:kaiser} assumes a small density contrast and a coherent infall. It fails where $F=e^{-\tau}$ is nonlinear, where saturated lines stop responding, where random motions suppress $\mu\sim 1$, and where one constant $b_F$ cannot describe strong overdensities or gas near galaxies \cite{Kooistra:2022hzw}.
+
+\subsection{Skewers: why the lines are one-dimensional}
+
+The skewer path uses the same $P_\mathrm{CDM}$ and then builds lines. It does not build a cube. For an isotropic spectrum the power along one row of a cube is fixed before the cube exists,
+\begin{equation}
+\label{eq:matter1d}
+P_{1\mathrm{D},\mathrm{matter}}(k_\parallel)
+=
+\frac{1}{2\pi}
+\int_{k_\parallel}^{q_\mathrm{max}}
+q\,P_\mathrm{CDM}(q)\,\mathrm{d}q.
+\end{equation}
+There is no $b_F$ and no $\mu$ here. The upper limit is the last $k$ in the table. Each line is then drawn in Fourier space so that it carries this power: complex Gaussian modes, a zero mean mode, and an inverse transform (\path{generate_gaussian_skewers}). Neighbouring lines in a real cube share clumps. These lines are independent, which is enough for a one-dimensional power and not enough for a cross-power or for $P_F(k,\mu)$.
+
+A line in the summary figure is periodic, $L=200\,\mathrm{Mpc}/h$, with $N=512$ pixels, so the pixel is $0.391\,\mathrm{Mpc}/h$ and the Nyquist mode is $\pi N/L\approx 8\,h\,\mathrm{Mpc}^{-1}$. The Gaussian contrast is mapped to a positive density \cite{Coles:1991if,Bi:1996fh},
+\begin{equation}
+\label{eq:lognormal}
+\Delta=\exp\!\left(\delta_G-\tfrac12\mathrm{Var}(\delta_G)\right).
+\end{equation}
+Photoionization equilibrium and $T\propto\Delta^{\gamma-1}$, with a recombination rate $\propto T^{-0.7}$, give the optical depth \cite{Gunn:1965hd,Hui:1997dp,Kooistra:2022hzw}
+\begin{equation}
+\label{eq:fgpa}
+\beta=2-0.7(\gamma-1),
+\qquad
+\tau=A\Delta^{\beta},
+\qquad
+F=e^{-\tau}.
+\end{equation}
+The fiducial index is $\gamma=1.5$, so $\beta=1.65$. This $\beta$ is not the Kaiser $\beta_F$. Arya et al.\ use the same lognormal-to-flux sequence, with a Jeans cutoff and an amplitude set by temperature and the photoionization rate \cite{Arya:2022uke}. Here $A$ is solved so that the average of $F$ over every pixel of every line equals $0.80$. For the figure-07 lines that solution is $A=0.485$. The target is an input. At $z=3$ the observed mean transmission is closer to $0.7$. Pressure smoothing and thermal broadening exist as Gaussian pixel filters and default to zero. Peculiar velocities are applied only if an external displacement is passed in. The plotted lines are real space.
+
+The flux power is not another integral. It is the Fourier transform of $\delta_F=F/\langle F\rangle-1$, averaged over the lines (\path{measure_p1d}). The same factor Eq.~\eqref{eq:units} converts it to $\mathrm{km\,s}^{-1}$.
+
+With pressure smoothing off, the lognormal density variance on the figure-07 lines is about $19$. That is outside the small-fluctuation assumption of Eq.~\eqref{eq:kaiser}. Kooistra, Lee, and Horowitz show that $\tau\propto\Delta^{\beta}$ fails in strong overdensities and where galactic feedback matters \cite{Kooistra:2022hzw}. Arya, Paranjape, and Choudhury show that missing the longest waves along a sightline can shift the gas parameters by about $2\sigma$, even when the cross-bin piece of the covariance is a smaller effect \cite{Arya:2023ipe}. Neither effect is in stage~1. A later paper of the same group adds one extra parameter to the lognormal width because the plain lognormal does not follow the flux statistics from $z=2$ to $2.7$ \cite{Arya:2023fal}. That parameter is not in this code.
+
+\subsection{Why the two flux spectra do not overlie}
+
+On figure~07 both curves are $P_{1\mathrm{D}}$ in $\mathrm{km\,s}^{-1}$ at $z=3$. The analytic height is $b_F^{2}$ times the velocity factor. The skewer height is fixed by the mean flux. The analytic curve includes peculiar velocities. The skewers do not. The analytic curve is linear. The skewers use $e^{-\tau}$ on a field with density variance about $19$. Dividing each curve by its own value at $0.005\,\mathrm{s\,km}^{-1}$ removes the normalisation. The shapes then follow each other. That is figure~08. For a small, smoothed, real-space field the amplitudes would agree as well, with $b_F=-A\beta$ and $\beta_F=0$. Matching $(1+\beta_F\mu^{2})^{2}$ needs velocities that know about modes perpendicular to the line of sight. Independent lines do not have those modes.
+
+A one percent increase in $A_s$ raises the analytic $P_{1\mathrm{D}}$ by one percent at every $k_\parallel$. A change in $n_s$ tilts it. Derivatives for a Fisher matrix would be taken on that path. The skewer power depends on the random seed.
+
+\subsection{Stage 1 plots}
+
+All of these are in \path{plots/}, as PNG and PDF. They are produced by \path{make_checks.py}.
+
+\begin{center}
+\small
+\begin{tabular}{@{}lp{0.72\textwidth}@{}}
+\toprule
+File & What it shows \\
+\midrule
+\texttt{01\_pcdm\_ns\_As} &
+Linear $P_\mathrm{CDM}(k)$ at $z=0$. Lowering $n_s$ adds large-scale power. Changing $A_s$ moves the curve up or down. \\
+\texttt{02\_p1d\_ns\_As} &
+The same changes after the Kaiser factor and the line-of-sight integral, as $P_{1\mathrm{D}}$ in $\mathrm{km\,s}^{-1}$ at $z=3$. \\
+\texttt{03\_p1d\_fractional} &
+A $1\%$ rise in $A_s$ raises $P_{1\mathrm{D}}$ by $1\%$ at every $k$. Raising $n_s$ by $0.01$ tilts it from about $2\%$ to about $4\%$. \\
+\texttt{04\_p1d\_redshifts} &
+$z=2.2$, $3$, and $4$ at fixed cosmology. $b_F$ and $\beta_F$ do not evolve. The amplitude changes through $D(z)$ and through Eq.~\eqref{eq:units}. \\
+\texttt{05\_abgd\_shape} &
+One $\alpha$, $\beta$, or $\gamma$ coefficient at a time. On $P_\mathrm{CDM}$ every curve crosses zero at $k_p=1\,h\,\mathrm{Mpc}^{-1}$. All four coefficients zero is Eisenstein--Hu. \\
+\texttt{06\_table\_rescaling} &
+A stored $P(k)$, after changing $A_s$ or $n_s$, matches a direct Eisenstein--Hu evaluation at about $10^{-6}$. \\
+\texttt{07\_pipeline\_stages} &
+Four panels: matter $P(k)$, matter $P_{1\mathrm{D}}$, both flux $P_{1\mathrm{D}}$ curves, and one transmitted-flux line with mean $0.80$ and $A=0.485$. The blue curve is Kaiser. The orange curve is $256$ skewers. \\
+\texttt{08\_kaiser\_vs\_fgpa\_shape} &
+Each flux curve divided by its value at $0.005\,\mathrm{s\,km}^{-1}$. Shapes agree. The orange curve is noisy. \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\subsection{Where stage 1 lives in the code}
+
+\begin{center}
+\small
+\begin{tabular}{@{}p{0.42\textwidth}p{0.48\textwidth}@{}}
+\toprule
+Step & Function \\
+\midrule
+Eisenstein--Hu $P_\mathrm{CDM}$ &
+\path{linear_matter_power} in \path{p1d/eisenstein_hu.py} \\
+File, and $A_s$, $n_s$, growth rescaling &
+\path{TabulatedMatterPower} in \path{p1d/matter_table.py} \\
+$\alpha\beta\gamma\delta$ bend &
+\path{p1d_skm_abgd} in \path{p1d/abgd.py} \\
+Kaiser $P_F$ and the integral to $P_{1\mathrm{D}}$ &
+\path{p1d_skm} in \path{p1d/flux.py} \\
+Isotropic matter projection &
+\path{project_p1d} in \path{p1d/projection.py} \\
+Gaussian lines and measured $P_{1\mathrm{D}}$ &
+\path{generate_gaussian_skewers}, \path{measure_p1d} in \path{p1d/skewers.py} \\
+Lognormal density, $\tau=A\Delta^{\beta}$, mean flux &
+\path{run_fgpa_skewers} in \path{p1d/fgpa_field.py} \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\noindent
+From the repository root, \path{python make_checks.py} writes figures 01--08 and \path{python -m pytest -q} runs the tests. The folder \path{prototype/mini_p1d/} is an earlier prototype. It is stored unchanged. Its built-in spectrum is a smooth demonstration curve, not Eisenstein--Hu, and \path{make_checks.py} does not call it.
+
+\section{Stage 2: the meeting list}
+\label{sec:stage2}
+
+The 13~October meeting (Keir, Helena, Vera) asked for six extensions.
+
+\begin{enumerate}
+\item Simulate smaller scales, up to $k\sim 0.2\,\mathrm{s\,km}^{-1}$ at $z\sim 5$.
+\item Simulate more spectra and check that the noise diminishes.
+\item Simulate in three dimensions so that $P_{\mathrm{flux},3D}(k,\mu)$ can be measured.
+\item Compare that measurement with the Arinyo-i-Prats nonlinear model.
+\item Put a Gaussian pressure filter on the gas.
+\item Use a lognormal density to capture weakly nonlinear dark matter.
+\end{enumerate}
+
+Nothing in stage~1 was removed. The first, fifth, and sixth items were started. The third and fourth have not been run. The second has been run.
+
+\subsection{What has already been coded}
+
+The pressure filter that was added is the Jeans factor of Arya et al.\ \cite{Arya:2022uke},
+\begin{equation}
+\label{eq:jeans}
+P_\mathrm{CDM}(k)\to P_\mathrm{CDM}(k)\,\exp(-2 x_J^{2} k^{2}),
+\end{equation}
+with $k$ in $h\,\mathrm{Mpc}^{-1}$ and $x_J$ in $\mathrm{Mpc}/h$. The two lengths used are $x_J=0.10\,\mathrm{Mpc}/h$ ($100\,\mathrm{kpc}/h$) and $x_J=0.05\,\mathrm{Mpc}/h$ ($50\,\mathrm{kpc}/h$), both comoving. A shorter length is less smoothing. \path{with_jeans} in \path{p1d/jeans.py} returns a new table. The input table is not modified, and $x_J=0$ is the stage~1 spectrum. The old pixel Gaussian, \path{pressure_sigma_pixels}, is still in the skewer code and still defaults to zero. Equation~\eqref{eq:jeans} is applied to the matter spectrum before the lines are drawn. It is not a separate filter on the gas after the lognormal map.
+
+The lognormal map itself was already Eq.~\eqref{eq:lognormal}. The new comparison measures the one-dimensional density power of the Gaussian contrast and of $\Delta-1$ on the same lines. The small-scale lines are shorter than figure~07, $L=40\,\mathrm{Mpc}/h$ with $1024$ pixels, so the Nyquist mode is past the cutoff. These figures are written by \path{make_extension_plots.py}.
+
+\begin{center}
+\small
+\begin{tabular}{@{}lp{0.72\textwidth}@{}}
+\toprule
+File & What it shows \\
+\midrule
+\texttt{09\_3d\_power\_spectrum} &
+Left: $P_\mathrm{CDM}(k)$ at $z=3$, unsmoothed and with the two Jeans lengths. They agree out to about $1\,h\,\mathrm{Mpc}^{-1}$; $100\,\mathrm{kpc}/h$ falls first. Right: the Kaiser formula for $P_F(k,\mu)$ at $\mu=0$ and $\mu=1$. The $\mu=1$ curve is a factor $(1+1.4)^{2}=5.76$ higher. This panel evaluates Eq.~\eqref{eq:kaiser}. It is not a measurement from a cube. \\
+\texttt{10\_gaussian\_vs\_lognormal} &
+Density $P_{1\mathrm{D}}$ of $\delta$ and of $\Delta-1$. With no Jeans factor the Gaussian variance is $6.1$, $34\%$ of the pixels have $1+\delta\le 0$, and the lognormal variance is $175$. A Gaussian density cannot be fed to Eq.~\eqref{eq:fgpa}. At $100\,\mathrm{kpc}/h$ the variances fall to $1.28$ and $2.42$, and both spectra drop past about $10\,h\,\mathrm{Mpc}^{-1}$. The lognormal drops later: the exponential puts small-scale power back. At $50\,\mathrm{kpc}/h$ the drop moves to higher $k$. \\
+\texttt{11\_flux\_jeans\_scales} &
+Left: Kaiser $P_{1\mathrm{D}}$ of the screened matter spectrum. Right: lognormal flux $P_{1\mathrm{D}}$ with $\langle F\rangle=0.80$. Both agree below about $0.01\,\mathrm{s\,km}^{-1}$. Above that, $100\,\mathrm{kpc}/h$ falls first. The lognormal flux falls less than Kaiser. On these short lines the fitted $A$ is $2.41$, $0.256$, and $0.327$ for no cutoff, $100\,\mathrm{kpc}/h$, and $50\,\mathrm{kpc}/h$. That is not the $A=0.485$ of figure~07, because these lines resolve smaller scales. \\
+\texttt{12\_skewer\_noise} &
+The lower-left panel of figure~07, from one draw of $4096$ lines in the same geometry. Averaging $256$ lines differs from the $4096$-line spectrum by an rms fraction $0.057$ over $10^{-3}$ to $0.02\,\mathrm{s\,km}^{-1}$. Averaging $1024$ lines differs by $0.030$. The ratio is $1.88$, against $\sqrt{4}=2$. The offset from the Kaiser curve remains, so that offset is the flux model. \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+Figure~07 itself used $256$ lines, not $500$. Replacing $256$ by $500$ would shrink the wiggles only by $\sqrt{256/500}\approx 0.7$.
+
+The small-scale flux plots are at $z=3$. They reach beyond $0.1\,\mathrm{s\,km}^{-1}$ on the short lines. They do not reach the meeting request of $z\sim 5$ and $k\sim 0.2\,\mathrm{s\,km}^{-1}$.
+
+\subsection{What has not been run}
+
+The meeting asked for a three-dimensional realisation so that $P_{\mathrm{flux},3D}(k,\mu)$ is measured, and for a comparison of that measurement to the Arinyo-i-Prats nonlinear model. Neither is in the repository. Figure~09 is the analytic formula, not that measurement. Independent one-dimensional lines cannot supply $\mu$, because $\mu$ needs modes perpendicular to the line of sight.
+
+The planned calculation, not yet executed, is the following.
+
+\begin{enumerate}
+\item Repeat the small-scale flux spectra at $z=5$, with the line length and pixel size chosen so that the Nyquist mode reaches $k_\parallel=0.2\,\mathrm{s\,km}^{-1}$. At $z=5$ in the fiducial cosmology, $\mathrm{d}v/\mathrm{d}\chi$ is larger than at $z=3$, and $0.2\,\mathrm{s\,km}^{-1}$ corresponds to roughly $30\,h\,\mathrm{Mpc}^{-1}$. The same Jeans lengths, $100$ and $50\,\mathrm{kpc}/h$, would be shown.
+\item Build one periodic three-dimensional Gaussian box from $P_\mathrm{CDM}$, optionally multiplied by Eq.~\eqref{eq:jeans}. Measure the flux power as a function of $k$ and $\mu$ from that box. Plot it against Eq.~\eqref{eq:kaiser} on the same box.
+\item Apply Eq.~\eqref{eq:lognormal} inside the same box, then Eq.~\eqref{eq:fgpa}, and measure $P_F(k,\mu)$ again. This is the weakly nonlinear density only when the Jeans factor has brought the variance down to order one. Without that factor the stage~2 lines are strongly nonlinear.
+\item Evaluate the Arinyo-i-Prats fitting formula for $P_F(k,\mu)$ on the same $k$ and $\mu$ grid and overlay it. That formula multiplies the Kaiser expression by a scale- and angle-dependent function. It is not yet coded, and its parameter values will be taken from the paper rather than refitted.
+\end{enumerate}
+
+Stage~1 functions stay as they are. The new measurement would be a separate module and a separate figure. It has not been pushed to GitHub.
+
+\section{Where the files are}
+\label{sec:where}
+
+On the laptop where this note was written, the repository is the folder
+\begin{center}
+\path{/Users/helenagescu/fisher-forecasts-future-spectroscopic-survey}
+\end{center}
+The GitHub copy is
+\path{github.com/garciaeh77/fisher-forecasts-future-spectroscopic-survey}.
+This note is \path{docs/pipeline_report.tex}. The bibliography next to it is \path{docs/references.bib}. Both files have to be uploaded together.
+
+\begin{center}
+\small
+\begin{tabular}{@{}>{\raggedright\arraybackslash}p{0.38\textwidth}p{0.55\textwidth}@{}}
+\toprule
+Folder or file & What it is \\
+\midrule
+\path{p1d/} & The calculator. Every function named below is in this folder. \\
+\path{p1d/flux.py} & Kaiser path. Start here for the analytic \(P_{1\mathrm{D}}\). \\
+\path{p1d/eisenstein_hu.py} & Transfer function, growth, and \(P_\mathrm{CDM}\). \\
+\path{p1d/matter_table.py} & Reading a CLASS or CAMB file. \\
+\path{p1d/abgd.py} & The four-parameter bend. \\
+\path{p1d/fgpa_field.py} & Skewer path. Start here for the optical depth. \\
+\path{p1d/projection.py} & Matter integral that the lines are drawn from. \\
+\path{p1d/skewers.py} & Drawing the lines and measuring their power. \\
+\path{p1d/jeans.py} & Stage~2 cutoff. Not called unless you pass its table in. \\
+\path{make_checks.py} & Writes plots 01--08. \\
+\path{make_extension_plots.py} & Writes plots 09--12. \\
+\path{plots/} & The PDF and PNG figures. \\
+\path{tests/} & The checks run by \path{pytest}. \\
+\path{docs/} & This note, the slides, and \path{references.bib}. \\
+\path{prototype/mini_p1d/} & The earlier prototype, stored unchanged. \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\section{How the code runs, line by line}
+\label{sec:linebyline}
+
+Read the functions in this order. The Kaiser path is \path{p1d_skm}. The skewer path is \path{run_fgpa_skewers}. Every other function is called from one of those two. \path{transfer} in \path{eisenstein_hu.py} is the long Eisenstein--Hu fit. It does not need to be read line by line. \path{linear_matter_power} is the function that uses it.
+
+\subsection{Kaiser path: \texttt{p1d\_skm}}
+
+The function is in \path{p1d/flux.py}. Its arguments, in order, are \(k_\parallel\) in s/km, redshift, \(n_s\), \(A_s\), \(\Omega_m\), \(\Omega_b\), and \(h\). Two more are already set: \path{b_f=-0.14} and \path{beta_f=1.4}.
+
+\begin{enumerate}
+\item \path{k_h = k_skm_to_hmpc(...)} converts the input wavenumber from s/km to \(h\,\mathrm{Mpc}^{-1}\). That function multiplies by \path{velocity_per_mpch}, which is \(H(z)/((1+z)h)\). \path{hubble_kms}, in \path{eisenstein_hu.py}, is the square root \(H(z)=100h\sqrt{\Omega_m(1+z)^3+1-\Omega_m}\).
+\item \path{flux_power_1d} does the physics. It returns \(P_{1\mathrm{D}}\) still in Mpc/h.
+\item \path{p1d_h_to_kms} multiplies by the same velocity factor and returns km/s. That is the value \path{p1d_skm} gives back.
+\end{enumerate}
+
+Inside \path{flux_power_1d} the lines do the following.
+
+\begin{enumerate}
+\item \path{log_k = np.linspace(...)} and \path{k = np.exp(log_k)} build 800 logarithmically spaced wavenumbers from the smallest requested \(k_\parallel\) up to \path{k_max=30} in \(h\,\mathrm{Mpc}^{-1}\).
+\item If \path{matter_power} was not passed, \path{linear_matter_power} builds the Eisenstein--Hu spectrum on that grid. If it was passed, that callable is used instead, and \(n_s\), \(A_s\), and \(\Omega_b\) are not used for the shape. Redshift, \(\Omega_m\), and \(h\) are still used for the unit conversion in \path{p1d_skm}.
+\item The loop is one output \(k_\parallel\) at a time. \path{use = k >= kp} keeps only modes above that \(k_\parallel\). \path{mu = kp / kk} is \(k_\parallel/k\).
+\item The next line is Eq.~\eqref{eq:kaiser}: \path{b_f**2 * (1 + beta_f * mu**2)**2 * p_m}.
+\item \path{np.trapezoid(kk * p3, kk) / (2 * pi)} is Eq.~\eqref{eq:p1d}.
+\end{enumerate}
+
+\path{linear_matter_power} in \path{p1d/eisenstein_hu.py} is the matter spectrum itself.
+
+\begin{enumerate}
+\item \path{k_mpc = k_h * h} removes \(h\), because \path{transfer} wants \(\mathrm{Mpc}^{-1}\).
+\item \path{t = transfer(...)} is \(T(k)\) from Eisenstein and Hu, with \(T(0)=1\).
+\item \path{d = growth(...)} is \(D(z)\). The function \path{growth} integrates the linear growth equation on a grid in the scale factor and normalises it so that \(D(a)\to a\) in matter domination.
+\item \path{shape = (k_mpc / 0.05)**(ns-1) * k_mpc * t**2} is the primordial tilt times \(k\,T(k)^2\). The pivot \(0.05\,\mathrm{Mpc}^{-1}\) is \path{K_PIVOT_MPC}.
+\item The next line multiplies by \(8\pi^2 A_s/(25\Omega_m^2 H_0^4)\) and by \(D(z)^2\). \(H_0\) is \path{100*h/299792.458} in \(\mathrm{Mpc}^{-1}\).
+\item \path{return p_mpc * h**3} converts \(\mathrm{Mpc}^3\) to \((\mathrm{Mpc}/h)^3\).
+\end{enumerate}
+
+\subsection{Skewer path: \texttt{run\_fgpa\_skewers}}
+
+The function is in \path{p1d/fgpa_field.py}. It takes a \path{TabulatedMatterPower} and a \path{SkewerConfig}. The configuration holds the redshift, \(n_s\), \(A_s\), the cosmology, the line length, the pixel count, the number of lines, the target mean flux, \(\gamma\), the two smoothing widths, and the random seed.
+
+\begin{enumerate}
+\item \path{rfft_modes} in \path{skewers.py} lists the wavenumbers that fit on a periodic line: \(k=2\pi j/L\), up to the Nyquist mode \(\pi N/L\). The pixel size is \(L/N\).
+\item The next two statements stop the run if the Nyquist mode lies above the matter table or the longest wave lies below it. The code does not extrapolate the table.
+\item \path{pk3d = matter_power(q_grid, ...)} evaluates the three-dimensional matter spectrum on 8192 logarithmically spaced \(k\). \path{As}, \path{ns}, and \path{growth_ratio} rescale that table as in Eq.~\eqref{eq:table}.
+\item \path{project_p1d} integrates it to the matter \(P_{1\mathrm{D}}\) of Eq.~\eqref{eq:matter1d}. There is no \(b_F\) and no \(\mu\). In \path{projection.py} the integral is a cumulative trapezoid taken from the high-\(k\) end of the grid, then interpolated onto the modes of the line.
+\item \path{generate_gaussian_skewers} draws the lines. For every \(k>0\) it draws a complex Gaussian number whose variance is \path{n_pixels**2 * P_1D / length}. The \(k=0\) mode is set to zero, so each line has mean zero. If \(N\) is even, the Nyquist mode is kept real. \path{np.fft.irfft} turns the waves into the contrast \(\delta(x)\). The seed only makes the draw repeatable. The lines are independent of each other.
+\item \path{smooth_periodic(gaussian, pressure_sigma_pixels)} is a Gaussian blur in pixels. The default width is 0, so this line copies the array and does nothing.
+\item \path{lognormal_density} is one expression: \(\Delta=\exp(\delta-\sigma^2/2)\), with \(\sigma^2\) the variance of the lines just drawn. This is Eq.~\eqref{eq:lognormal}.
+\item \path{prepare_tau_unit} calls \path{optical_depth_unit}, which is \(\Delta^\beta\). \path{fgpa_exponent} is \(\beta=2-0.7(\gamma-1)\). At \(\gamma=1.5\) this is \(1.65\). A pixel shift is applied only if \path{displacement_pixels} was passed. The thermal smooth is again \path{smooth_periodic}, and its default width is also 0.
+\item \path{calibrate_mean_flux} searches \(\ln A\) with a root finder until the average of \(e^{-A\tau}\), over every pixel of every line, equals \path{target_mean_flux}. The default target is \(0.80\).
+\item \path{transmitted_flux} is \(F=e^{-A\tau}\). \path{flux_contrast} is \(F/\langle F\rangle-1\).
+\item \path{measure_p1d} Fourier-transforms every line and returns \((\mathrm{d}x)^2/L\) times the average of \(|\tilde\delta_F|^2\). That array, after \path{p1d_h_to_kms}, is the orange curve.
+\end{enumerate}
+
+The dictionary returned by \path{run_fgpa_skewers} stores \path{k_skm} and \path{p1d_flux_kms} for the spectrum, \path{fgpa_A}, \path{fgpa_beta}, and \path{mean_flux} for the normalisation, and \path{sample_flux_skewer} for one transmitted-flux line.
+
+\subsection{The Jeans cutoff is outside both paths}
+
+\path{with_jeans} in \path{p1d/jeans.py} is not called by \path{p1d_skm} or by \path{run_fgpa_skewers}. It copies the \(k\) grid and the power of an existing table, multiplies the power by \(\exp(-2 x_J^2 k^2)\), and returns a new \path{TabulatedMatterPower}. The table you handed it is unchanged. \(x_J=0\) multiplies by one. To use the cutoff, pass that new table into \path{run_fgpa_skewers}, or pass \path{matter_power=lambda q: screened(q)} into \path{p1d_skm}. Plots 09--12 are produced by \path{make_extension_plots.py}, which does exactly that. Plots 01--08 are produced by \path{make_checks.py}, which does not.
+
+\bibliographystyle{unsrtnat}
+\bibliography{references}
+
+\end{document}

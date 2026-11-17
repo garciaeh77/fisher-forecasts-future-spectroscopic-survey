@@ -1,0 +1,250 @@
+\documentclass[11pt]{article}
+
+\usepackage{amsmath,amssymb}
+\usepackage{booktabs}
+\usepackage{geometry}
+\usepackage{hyperref}
+\usepackage[numbers,sort&compress]{natbib}
+\usepackage{array}
+\usepackage{xurl}
+
+\newcolumntype{L}[1]{>{\raggedright\arraybackslash\hspace{0pt}}p{#1}}
+
+\geometry{margin=1in}
+\hypersetup{colorlinks=true,linkcolor=blue,citecolor=blue,urlcolor=blue}
+
+\title{Where each pipeline step lives in the code}
+\author{Helena}
+\date{13 October 2026}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+This note pairs each step of the analytic and skewer calculations with the function that implements it. The equations and the assumptions are derived in \texttt{pipeline\_steps.tex}. The package is \texttt{p1d/} in \texttt{garciaeh77/fisher-forecasts-future-spectroscopic-survey}. Run the commands from that repository root. The other prototype under \texttt{prototype/mini\_p1d/} is not called by these functions.
+\end{abstract}
+
+\section{How to run both paths}
+
+Both paths and the eight check figures:
+\begin{verbatim}
+python make_checks.py
+python -m pytest -q
+\end{verbatim}
+Figures are written to \texttt{plots/01}--\texttt{plots/08} as PNG and PDF. Plot \texttt{07\_pipeline\_stages} shows both flux spectra. The blue curve is the analytic Kaiser result. The orange curve is measured from the skewers.
+
+Analytic $P_{1\mathrm{D}}$ only, in $\mathrm{km\,s}^{-1}$, at the eight points $k=10^{-3}$ to $0.02\,\mathrm{s\,km}^{-1}$:
+\begin{verbatim}
+python -c "
+import numpy as np
+from p1d.flux import p1d_skm
+k = np.logspace(-3, np.log10(0.02), 8)
+print(p1d_skm(k, 3.0, 0.965, 2.1e-9, 0.31, 0.049, 0.67))
+"
+\end{verbatim}
+The arguments of \texttt{p1d\_skm} are $k_\parallel$ in $\mathrm{s\,km}^{-1}$, redshift, $n_s$, $A_s$, $\Omega_m$, $\Omega_b$, and $h$. The flux bias and the redshift-space parameter are keyword arguments \texttt{b\_f=-0.14} and \texttt{beta\_f=1.4}.
+
+Skewer path only:
+\begin{verbatim}
+python -c "
+from p1d.matter_table import TabulatedMatterPower
+from p1d.fgpa_field import SkewerConfig, run_fgpa_skewers
+table = TabulatedMatterPower.from_eisenstein_hu(
+    3.0, 0.965, 2.1e-9, 0.31, 0.049, 0.67, kmax=80.0)
+config = SkewerConfig(
+    redshift=3.0, As=2.1e-9, ns=0.965,
+    omega_m=0.31, omega_b=0.049, h=0.67,
+    length_mpch=200.0, n_pixels=512, n_skewers=256,
+    target_mean_flux=0.80, gamma=1.5, seed=7)
+result = run_fgpa_skewers(table, config)
+print(result['mean_flux'], result['fgpa_A'], result['fgpa_beta'])
+"
+\end{verbatim}
+\texttt{result['k\_skm']} is $k_\parallel$ in $\mathrm{s\,km}^{-1}$. \texttt{result['p1d\_flux\_kms']} is the measured flux $P_{1\mathrm{D}}$ in $\mathrm{km\,s}^{-1}$.
+
+\section{Analytic path, step by step}
+
+The single entry point is \texttt{p1d.flux.p1d\_skm}.
+
+\begin{center}
+\small
+\begin{tabular}{@{}L{0.28\textwidth}L{0.36\textwidth}L{0.28\textwidth}@{}}
+\toprule
+Step & Equation in \texttt{pipeline\_steps.tex} & Function \\
+\midrule
+Forest $k$ to $h\,\mathrm{Mpc}^{-1}$ &
+unit conversion &
+\texttt{k\_skm\_to\_hmpc} \\
+$H(z)$ and $\mathrm{d}v/\mathrm{d}\chi$ &
+Hubble rate, velocity factor &
+\texttt{hubble\_kms}, \texttt{velocity\_per\_mpch} \\
+Linear $P_\mathrm{CDM}$ &
+primordial spectrum times $T(k)^{2}D(z)^{2}$ &
+\texttt{linear\_matter\_power} \\
+Transfer function $T(k)$ &
+Eisenstein--Hu, $T(0)=1$ &
+\texttt{transfer} \\
+Growth $D(z)$ &
+$D(a)\to a$ in matter domination &
+\texttt{growth} \\
+Three-dimensional flux power &
+$b_F^{2}(1+\beta_F\mu^{2})^{2}P_\mathrm{CDM}$ &
+\texttt{flux\_power\_3d} \\
+Line-of-sight integral &
+$\int_{k_\parallel}^{k_\mathrm{max}} k\,\mathrm{d}k\,P_F/(2\pi)$ &
+\texttt{flux\_power\_1d} \\
+Back to $\mathrm{km\,s}^{-1}$ &
+multiply by $\mathrm{d}v/\mathrm{d}\chi$ &
+\texttt{p1d\_h\_to\_kms} \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\noindent
+All of these functions are in \path{p1d/flux.py}, except \path{transfer}, \path{growth}, \path{hubble_kms}, and \path{linear_matter_power}, which are in \path{p1d/eisenstein_hu.py}.
+
+Inside \texttt{flux\_power\_1d} the integral is a trapezoid over 800 logarithmic samples from the smallest requested $k_\parallel$ to \texttt{k\_max=30}. For each output $k_\parallel$ only samples with $k\ge k_\parallel$ are kept, and $\mu=k_\parallel/k$ is recomputed on those samples. If the optional argument \texttt{matter\_power} is passed, that callable replaces \texttt{linear\_matter\_power}. It must accept $k$ in $h\,\mathrm{Mpc}^{-1}$ and return $P_\mathrm{CDM}$ in $(\mathrm{Mpc}/h)^{3}$. In that case $n_s$, $A_s$, and $\Omega_b$ are not used to build the shape. Redshift, $\Omega_m$, and $h$ are still used for the unit conversion.
+
+\subsection{Other ways to supply $P_\mathrm{CDM}$}
+
+\begin{center}
+\small
+\begin{tabular}{@{}L{0.28\textwidth}L{0.32\textwidth}L{0.32\textwidth}@{}}
+\toprule
+Input & What it implements & Function and file \\
+\midrule
+Eisenstein--Hu on a $k$ grid &
+default table, $k$ from $10^{-3}$ to $100$ &
+\path{TabulatedMatterPower.from_eisenstein_hu} in \path{matter_table.py} \\
+CLASS or CAMB file &
+two columns, no extrapolation &
+\texttt{load\_power\_table}, then \texttt{TabulatedMatterPower} \\
+Rescale $A_s$, $n_s$, growth &
+$P_\mathrm{fid}$ times amplitude, tilt, and $D^{2}$ &
+\texttt{TabulatedMatterPower.\_\_call\_\_} \\
+$D(z)/D(z_\mathrm{fid})$ &
+same growth integral as the fitting formula &
+\texttt{growth\_ratio} \\
+$\alpha\beta\gamma\delta$ bend &
+$P_\mathrm{EH}\exp(\alpha L+\cdots+\delta L^{4})$, $L=\ln(k/k_p)$, $k_p=1$ &
+\texttt{shape\_factor}, \texttt{linear\_matter\_power\_abgd} in \texttt{abgd.py} \\
+Analytic $P_{1\mathrm{D}}$ with the bend &
+Kaiser integral of the bent spectrum &
+\texttt{p1d\_skm\_abgd} \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\noindent
+A file is passed into the analytic path by closing over the table:
+\begin{verbatim}
+k_file, pk_file = load_power_table("pk_camb.dat")
+table = TabulatedMatterPower(
+    k_file, pk_file,
+    As_fid=2.1e-9, ns_fid=0.965, kpivot_hmpc=0.05/0.67)
+p = p1d_skm(k, 3.0, 0.965, 2.1e-9, 0.31, 0.049, 0.67,
+            matter_power=lambda q: table(q))
+\end{verbatim}
+The file must already be linear $P(k)$ at the requested redshift, and it must reach at least $k=30\,h\,\mathrm{Mpc}^{-1}$. \texttt{As\_fid} and \texttt{ns\_fid} are the values that were used to make the file. To move away from them, call \texttt{table(q, As=..., ns=...)} inside \texttt{matter\_power}.
+
+\section{Skewer path, step by step}
+
+The single entry point is \texttt{p1d.fgpa\_field.run\_fgpa\_skewers(matter\_power, config)}. The configuration object is \texttt{SkewerConfig}. The matter argument is a \texttt{TabulatedMatterPower}, from \texttt{from\_eisenstein\_hu} or from a file.
+
+\begin{center}
+\small
+\begin{tabular}{@{}L{0.24\textwidth}L{0.36\textwidth}L{0.32\textwidth}@{}}
+\toprule
+Step & Equation & Function and file \\
+\midrule
+Modes that fit on one line &
+$k=2\pi\,j/L$, up to $\pi N/L$ &
+\texttt{rfft\_modes} in \texttt{skewers.py} \\
+Matter $P_{1\mathrm{D}}$ &
+$\int q\,P_\mathrm{CDM}(q)\,\mathrm{d}q/(2\pi)$, no bias &
+\texttt{project\_p1d} in \texttt{projection.py} \\
+Gaussian lines &
+complex Gaussian modes, zero mean mode, inverse FFT &
+\texttt{generate\_gaussian\_skewers} in \texttt{skewers.py} \\
+Pressure smooth &
+Gaussian in pixels, default width $0$ &
+\texttt{smooth\_periodic} \\
+Lognormal density &
+$\Delta=\exp(\delta_G-\sigma^{2}/2)$ &
+\texttt{lognormal\_density} in \texttt{fgpa\_field.py} \\
+IGM exponent &
+$\beta=2-0.7(\gamma-1)$ &
+\texttt{fgpa\_exponent} \\
+Unit optical depth &
+$\Delta^{\beta}$ &
+\texttt{optical\_depth\_unit} \\
+Peculiar velocity &
+only if a displacement is passed in &
+\texttt{remap\_optical\_depth\_cic} \\
+Thermal smooth &
+Gaussian on $\tau$, default width $0$ &
+\texttt{prepare\_tau\_unit} \\
+Solve for $A$ &
+$\langle e^{-A\tau}\rangle=\bar F$ &
+\texttt{calibrate\_mean\_flux} \\
+Transmitted flux &
+$F=e^{-A\tau}$ &
+\texttt{transmitted\_flux} \\
+Flux contrast &
+$F/\langle F\rangle-1$ &
+\texttt{flux\_contrast} \\
+Measured $P_{1\mathrm{D}}$ &
+$(\mathrm{d}x)^{2}/L$ times the mean squared amplitude &
+\texttt{measure\_p1d} in \texttt{skewers.py} \\
+Forest units &
+same $\mathrm{d}v/\mathrm{d}\chi$ as the analytic path &
+\texttt{k\_hmpc\_to\_skm}, \texttt{p1d\_h\_to\_kms} \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\noindent
+\texttt{project\_p1d} builds the integral as a cumulative trapezoid from the high-$k$ end of the table and interpolates to the line modes. It refuses any $k_\parallel$ outside that table. \texttt{run\_fgpa\_skewers} also refuses the run if the Nyquist mode lies above the table or the fundamental mode lies below it.
+
+\texttt{calibrate\_mean\_flux} searches in $\ln A$ with a bracketed root finder. The mean is the average of every pixel of every line, which is the average along the lines of sight. The returned dictionary stores that solution as \texttt{fgpa\_A}, the exponent as \texttt{fgpa\_beta}, the achieved mean as \texttt{mean\_flux}, and one example line as \texttt{sample\_flux\_skewer}.
+
+The number of lines is \texttt{SkewerConfig.n\_skewers}. Plot 07 uses $256$. Increasing it averages more independent spectra; the scatter falls as $1/\sqrt{N}$. The analytic curve does not use this number.
+
+\section{Defaults and where they are set}
+
+\begin{center}
+\small
+\begin{tabular}{@{}llp{0.42\textwidth}@{}}
+\toprule
+Quantity & Value & Where \\
+\midrule
+$\Omega_m$, $\Omega_b$, $h$ & $0.31$, $0.049$, $0.67$ & arguments of \texttt{p1d\_skm}; fields of \texttt{SkewerConfig} \\
+$n_s$, $A_s$ & $0.965$, $2.1\times 10^{-9}$ & same \\
+$z$ & $3$ in the checks & argument, or \texttt{SkewerConfig.redshift} \\
+$b_F$, $\beta_F$ & $-0.14$, $1.4$ & defaults of \texttt{flux\_power\_3d}, \texttt{flux\_power\_1d}, \texttt{p1d\_skm} \\
+$k_\mathrm{max}$ & $30\,h\,\mathrm{Mpc}^{-1}$ & \texttt{flux\_power\_1d} \\
+Integral samples & $800$ & \texttt{flux\_power\_1d} \\
+$\alpha,\beta,\gamma,\delta$ & all $0$ & \texttt{p1d\_skm\_abgd}; pivot $k_p=1\,h\,\mathrm{Mpc}^{-1}$ \\
+$\bar F$ & $0.80$ & \texttt{SkewerConfig.target\_mean\_flux} \\
+IGM $\gamma$ & $1.5$ (so $\beta=1.65$) & \texttt{SkewerConfig.gamma} \\
+Line length, pixels, lines & $200$, $512$ in plot 07, $256$ & \texttt{SkewerConfig}; class defaults are $1024$ pixels \\
+Pressure, thermal & $0$ pixels & \texttt{pressure\_sigma\_pixels}, \texttt{thermal\_sigma\_pixels} \\
+Seed & $7$ in plot 07 & \texttt{SkewerConfig.seed}; class default $12345$ \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+Plot 07 is \path{plot_pipeline} in \path{make_checks.py}. It builds the Eisenstein--Hu table, calls \path{run_fgpa_skewers} with the numbers above, calls \path{p1d_skm} on the same $k$ grid, and draws both curves. Plot 08 divides each curve by its value at $0.005\,\mathrm{s\,km}^{-1}$.
+
+\section{What is deliberately absent from these functions}
+
+\texttt{flux\_power\_3d} does not call the optical-depth functions, and \texttt{run\_fgpa\_skewers} does not multiply by $b_F$ or $\beta_F$. Redshift evolution of $b_F$, the McDonald small-scale factor, and an $A$ computed from $T_0$ and the photoionization rate are not implemented. The Jeans factor is not inside those functions. \path{p1d/jeans.py} returns a new table multiplied by $\exp(-2 x_J^2 k^2)$; the original table is left unchanged, and $x_J=0$ is the previous pipeline. \texttt{pressure\_sigma\_pixels} remains a Gaussian smooth in pixel units and still defaults to zero. Passing \texttt{displacement\_pixels} to \texttt{run\_fgpa\_skewers} is the only way the skewer path moves pixels. The analytic $\mu$ factor has no counterpart in the independent lines.
+
+The command \path{mini-p1d} in \path{prototype/mini_p1d/} runs the original skewer prototype on its demonstration spectrum. It does not call \path{p1d_skm} and it does not evaluate the Eisenstein--Hu transfer function.
+
+The equations implemented here are taken from Eisenstein and Hu \cite{Eisenstein:1997ik}, Kaiser \cite{Kaiser:1987qv}, McDonald \cite{McDonald:2001fe}, Hui and Gnedin \cite{Hui:1997dp}, Bi and Davidsen \cite{Bi:1996fh}, and the lognormal forest model of Arya et al.\ \cite{Arya:2022uke,Arya:2023ipe}. The fixed bias values are the round counterparts of the early DESI measurement \cite{Gordon:2023dua}. Full derivations and the remaining citations are in \texttt{pipeline\_steps.tex}. The shared bibliography is \texttt{references.bib}.
+
+\bibliographystyle{unsrtnat}
+\bibliography{references}
+
+\end{document}

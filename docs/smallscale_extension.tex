@@ -1,0 +1,86 @@
+\documentclass[11pt]{article}
+
+\usepackage{amsmath,amssymb}
+\usepackage{geometry}
+\usepackage{hyperref}
+\usepackage[numbers,sort&compress]{natbib}
+
+\geometry{margin=1in}
+\hypersetup{colorlinks=true,linkcolor=blue,citecolor=blue,urlcolor=blue}
+
+\title{Small-scale extension: three-dimensional spectrum,\\ lognormal density, and the Jeans cutoff}
+\author{Helena}
+\date{13 October 2026}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+This note adds three checks on top of the existing calculator. Nothing in the Kaiser function or the optical-depth skewer function was removed. A Jeans factor can now multiply a matter table before either path is called. The new figures are \texttt{plots/09} through \texttt{plots/12}.
+\end{abstract}
+
+\section{What was added}
+
+The previous pipeline still builds $P_\mathrm{CDM}$ with Eisenstein and Hu \cite{Eisenstein:1997ik}, converts it to flux with the Kaiser formula \cite{Kaiser:1987qv,McDonald:2001fe}, and, separately, draws Gaussian lines and maps them to a lognormal density before the optical depth \cite{Coles:1991if,Bi:1996fh,Hui:1997dp,Arya:2022uke}. Those calls are unchanged.
+
+The new piece is a multiplicative cutoff on the three-dimensional matter spectrum, taken from the lognormal model of Arya et al.,
+\begin{equation}
+\label{eq:jeans}
+P_\mathrm{CDM}(k) \to P_\mathrm{CDM}(k)\,\exp(-2 x_J^{2} k^{2}).
+\end{equation}
+Here $k$ is in $h\,\mathrm{Mpc}^{-1}$ and $x_J$ is in $\mathrm{Mpc}/h$. The two values requested are
+\begin{equation}
+x_J = 0.10\,\mathrm{Mpc}/h = 100\,\mathrm{kpc}/h,
+\qquad
+x_J = 0.05\,\mathrm{Mpc}/h = 50\,\mathrm{kpc}/h.
+\end{equation}
+Both are comoving. A smaller $x_J$ is a weaker cutoff: $50\,\mathrm{kpc}/h$ lets more small-scale power through than $100\,\mathrm{kpc}/h$. Setting $x_J=0$ returns the original table. The function that does this is \path{with_jeans} in \path{p1d/jeans.py}. It returns a new table and does not modify the one it is given.
+
+The lines used for the small-scale comparison are shorter than figure 07, so that the pixel Nyquist mode sits past the cutoff: $L=40\,\mathrm{Mpc}/h$, $1024$ pixels, $512$ lines. The noise test keeps the figure 07 geometry exactly: $L=200\,\mathrm{Mpc}/h$, $512$ pixels, redshift $3$, mean flux $0.80$.
+
+\section{Three-dimensional spectrum}
+
+Figure \texttt{plots/09\_3d\_power\_spectrum} has two panels, both at $z=3$.
+
+The left panel is the matter spectrum $P_\mathrm{CDM}(k)$. With no Jeans factor it is the Eisenstein--Hu curve already used in the calculator. The $100\,\mathrm{kpc}/h$ and $50\,\mathrm{kpc}/h$ curves lie on top of it from the largest scales through about $1\,h\,\mathrm{Mpc}^{-1}$. They fall away after that. At $k\sim 10\,h\,\mathrm{Mpc}^{-1}$ the $100\,\mathrm{kpc}/h$ curve is the lowest, then $50\,\mathrm{kpc}/h$, then the unsmoothed spectrum. The cutoff removes small-scale matter power and leaves the large-scale power alone.
+
+The right panel is the three-dimensional flux spectrum from the Kaiser formula,
+\begin{equation}
+P_F(k,\mu)=b_F^{2}(1+\beta_F\mu^{2})^{2}P_\mathrm{CDM}(k),
+\end{equation}
+with the same fixed $b_F=-0.14$ and $\beta_F=1.4$. The curve at $\mu=1$ sits above the curve at $\mu=0$ by $(1+\beta_F)^{2}=5.76$, which is the line-of-sight velocity boost. Putting $x_J=100\,\mathrm{kpc}/h$ on the $\mu=1$ curve does not move it at low $k$ and cuts it at high $k$, in the same place as the matter spectrum.
+
+\section{Gaussian density versus lognormal density}
+
+Figure \texttt{plots/10\_gaussian\_vs\_lognormal} measures the one-dimensional density power on the short lines. The blue curve is the Gaussian contrast $\delta$ that the lines are drawn with. The orange curve is $\Delta-1$, where
+\begin{equation}
+\Delta=\exp\!\left(\delta-\tfrac12\mathrm{Var}(\delta)\right)
+\end{equation}
+is the lognormal density already used by \path{lognormal_density}. This is the step Arya et al.\ take before the optical depth \cite{Arya:2022uke}. The forecast path was already doing it. The new plot compares the two fields on small scales, with and without Eq.~\eqref{eq:jeans}.
+
+Without a Jeans factor the Gaussian variance on these lines is $6.1$, and $34\%$ of the pixels have $1+\delta\le 0$. A Gaussian density $1+\delta$ is not a usable gas density here: it goes negative. The lognormal density stays positive, and its variance is $175$. Its $P_{1\mathrm{D}}$ lies above the Gaussian curve across the whole $k$ range. The exponential map adds small-scale power.
+
+With $x_J=100\,\mathrm{kpc}/h$ the Gaussian variance falls to $1.28$ and the lognormal variance to $2.42$. About $19\%$ of the Gaussian pixels are still negative, so the optical-depth step is still applied to the lognormal field, not to $1+\delta$. Both density spectra now drop past $k\sim 10\,h\,\mathrm{Mpc}^{-1}$. The lognormal curve drops later than the Gaussian one: the exponential puts some small-scale power back after the cutoff has removed it. Reducing the cutoff to $50\,\mathrm{kpc}/h$ moves that drop to higher $k$ and raises the variances again, to $1.99$ (Gaussian) and $5.57$ (lognormal). A shorter Jeans length is less smoothing, not more.
+
+\section{Flux power with the same cutoff}
+
+Figure \texttt{plots/11\_flux\_jeans\_scales} carries Eq.~\eqref{eq:jeans} into $P_{1\mathrm{D}}$ in $\mathrm{km\,s}^{-1}$. The left panel is the Kaiser integral of the screened matter spectrum. The right panel is the existing lognormal optical-depth measurement, with $A$ solved so that the mean flux is $0.80$.
+
+On the Kaiser side the three curves agree at $k_\parallel\lesssim 10^{-2}\,\mathrm{s\,km}^{-1}$ and then separate. The $100\,\mathrm{kpc}/h$ spectrum falls first, the $50\,\mathrm{kpc}/h$ spectrum falls later, and the unsmoothed spectrum keeps falling slowly. That is the same ordering as in the three-dimensional matter spectrum.
+
+On the lognormal side the ordering at high $k_\parallel$ is the same, but the drop is weaker than in the Kaiser panel. The nonlinear map $F=e^{-\tau}$ moves power back to small scales, which is the same effect seen in the density comparison. The fitted amplitudes are $A=2.41$ with no Jeans factor, $A=0.256$ at $100\,\mathrm{kpc}/h$, and $A=0.327$ at $50\,\mathrm{kpc}/h$. These are not the $A=0.485$ of figure 07. Figure 07 uses $200\,\mathrm{Mpc}/h$ lines whose Nyquist mode is only about $8\,h\,\mathrm{Mpc}^{-1}$. The short lines resolve the small-scale power that the Jeans factor is meant to cut, so the unscreened density variance is much larger and the $A$ that restores a mean flux of $0.80$ changes. The mean flux is $0.800$ in every case.
+
+Arya, Paranjape and Choudhury \cite{Arya:2023ipe} find that leaving long-wavelength modes out of this kind of model shifts the gas parameters by about $2\sigma$, even when the cross-bin covariance itself is a smaller effect. The cutoff added here is the small-scale half of that model. The lines are still at one redshift, still have zero mean mode, and still have no peculiar velocities.
+
+\section{Is the noise in figure 07 from the number of lines?}
+
+Yes. The lower-left panel of figure 07 is the average of $256$ independent lines, not $500$. Each line has its own random draw, so the orange curve scatters around the average it would have with infinitely many lines. The blue Kaiser curve is not random, and the vertical offset between blue and orange is not this noise. That offset is the difference between $b_F=-0.14$ and a mean flux of $0.80$.
+
+Figure \texttt{plots/12\_skewer\_noise} repeats that panel from one draw of $4096$ lines in the same geometry ($200\,\mathrm{Mpc}/h$, $512$ pixels, seed $7$). The pale curve averages the first $256$ lines, the dashed curve the first $1024$, and the solid curve all $4096$. Over $10^{-3}<k_\parallel<0.02\,\mathrm{s\,km}^{-1}$, the root-mean-square fractional difference from the $4096$-line spectrum is $0.057$ for $256$ lines and $0.030$ for $1024$ lines. The ratio is $1.88$, against $\sqrt{1024/256}=2$ for noise that falls as $1/\sqrt{N}$. Sixteen separate blocks of $256$ lines have a median fractional scatter of $0.058$, the same size.
+
+Using $500$ lines instead of $256$ would shrink the wiggles by only $\sqrt{256/500}\approx 0.7$. It would not remove them. The offset from the Kaiser curve remains after $4096$ lines, so that offset is the flux model, not the sample variance.
+
+\bibliographystyle{unsrtnat}
+\bibliography{references}
+
+\end{document}

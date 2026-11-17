@@ -1,0 +1,553 @@
+\documentclass[11pt]{article}
+
+\usepackage{amsmath,amssymb}
+\usepackage{booktabs}
+\usepackage{geometry}
+\usepackage{enumitem}
+\usepackage{hyperref}
+\usepackage{fancyhdr}
+
+\geometry{margin=1in}
+\hypersetup{colorlinks=true,linkcolor=blue,urlcolor=blue}
+\setlist[itemize]{leftmargin=1.4em,itemsep=0.35em,topsep=0.3em}
+\setlist[enumerate]{leftmargin=1.6em,itemsep=0.35em,topsep=0.3em}
+\pagestyle{fancy}
+\fancyhf{}
+\fancyhead[L]{\small Summary meeting --- Kier, Vera, Simeon}
+\fancyhead[R]{\small Helena}
+\fancyfoot[C]{\thepage}
+\renewcommand{\headrulewidth}{0.4pt}
+
+\title{Lyman-$\alpha$ $P_{1\mathrm{D}}$ calculator\\[0.35em]
+\large Summary for Kier, Vera, and Simeon\\[0.25em]
+\normalsize Narrative of Parts~I and~II, code, figures,\\
+open questions, and a 10-minute presentation script}
+\author{Helena}
+\date{8 November 2026}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+\noindent
+This note is a narrative brief of the Lyman-$\alpha$ one-dimensional flux-power calculator built for the forecast project.
+It explains, in order: why the calculator exists; what Part~I put in place before the 13~October discussion; what Part~II added afterwards; how each piece of code implements the equations; what the figures actually show; which decisions are still open before cross-power and Fisher work; and a timed spoken script for a ten-minute summary with Kier, Vera, and Simeon.
+The companion technical notes with full citations and embedded plots are \texttt{docs/part1.tex} and \texttt{docs/part2.tex}.
+\end{abstract}
+
+\paragraph{Repository.}
+\texttt{fisher-forecasts-future-spectroscopic-survey}.
+\textbf{Package:} \texttt{p1d/}.
+\textbf{Technical notes:} \texttt{part1.tex}, \texttt{part2.tex}, \texttt{references.bib}.
+
+\paragraph{Fiducial cosmology}
+used in essentially every numerical illustration:
+\begin{equation*}
+\Omega_m=0.31,\quad
+\Omega_b=0.049,\quad
+h=0.67,\quad
+n_s=0.965,\quad
+A_s=2.1\times 10^{-9}.
+\end{equation*}
+Unless stated otherwise the forest redshift is $z=3$.
+The Kaiser bias pair is held fixed at $b_F=-0.14$ and $\beta_F=1.4$ (a round form of the early DESI large-scale measurement).
+
+\tableofcontents
+\newpage
+
+%======================================================================
+\section{Why this calculator exists}
+%======================================================================
+
+The longer goal of the project is a Fisher forecast for future spectroscopic surveys that use the Lyman-$\alpha$ forest.
+A forecast needs a forward model: a map from cosmological parameters to an observable spectrum that can later be differentiated, given a covariance, and turned into error bars.
+
+The observable chosen for the first stage is the \emph{one-dimensional} flux power $P_{1\mathrm{D}}(k_\parallel,z)$.
+A forest spectrum is a line of sight through the intergalactic medium; it does not resolve transverse modes by itself.
+The natural auto-spectrum of that line is therefore a function of the line-of-sight wavenumber only.
+Wavenumbers are reported in the velocity units of a spectrum ($\mathrm{s\,km}^{-1}$), and power in $\mathrm{km\,s}^{-1}$, using the conversion
+\begin{equation*}
+\frac{\mathrm{d}v}{\mathrm{d}\chi}=\frac{H(z)}{(1+z)\,h}
+\end{equation*}
+in $\mathrm{km\,s}^{-1}$ per comoving $\mathrm{Mpc}/h$.
+At $z=3$ in the fiducial cosmology that factor is about $113\,\mathrm{km\,s}^{-1}$ per $\mathrm{Mpc}/h$, so the usual forest window $10^{-3}$--$0.02\,\mathrm{s\,km}^{-1}$ corresponds to roughly $0.11$--$2.3\,h\,\mathrm{Mpc}^{-1}$.
+
+What was deliberately \emph{left out} of Parts~I and~II is as important as what was put in.
+The cross-power with quasars or galaxies, the covariance of the flux power, survey windows, noise, and the Fisher matrix itself are the next stage.
+Parts~I and~II only build and test the auto-$P_{1\mathrm{D}}$ forward model, so that later forecast work starts from a documented, runnable baseline rather than from an undefined flux prescription.
+
+%======================================================================
+\section{Part~I --- narrative}
+%======================================================================
+
+\subsection{The organising idea}
+
+Part~I answers a single design question: given $n_s$, $A_s$, and a linear cold-dark-matter spectrum $P_\mathrm{CDM}$, how do we form a forest $P_{1\mathrm{D}}$?
+
+There is no unique answer in the literature.
+On the largest scales the forest can be treated as a linearly biased tracer with coherent peculiar velocities (Kaiser / McDonald).
+On smaller scales the transmitted flux is an exponential of an optical depth that is itself a nonlinear function of density, so a purely linear bias cannot be the whole story.
+Rather than choose one description and discard the other, Part~I implements \emph{both}, fed by the \emph{same} $P_\mathrm{CDM}$.
+That makes later comparisons controlled: when the two $P_{1\mathrm{D}}$ curves disagree, the disagreement is in the flux model, not in a hidden difference of the matter spectrum.
+
+\subsection{Building $P_\mathrm{CDM}$}
+
+The default three-dimensional spectrum is the Eisenstein--Hu fitting formula for the matter transfer function in a baryon--cold-dark-matter universe.
+It retains the baryon acoustic oscillations, is normalised so $T(k\to 0)=1$, and is a closed expression, so $n_s$ and $A_s$ can be varied without calling a Boltzmann code.
+Wavenumbers inside the transfer function are in $\mathrm{Mpc}^{-1}$ (without $h$); the returned power is converted to $(\mathrm{Mpc}/h)^{3}$.
+A direct comparison with CAMB at $z=0$ over $10^{-3}$--$10\,h\,\mathrm{Mpc}^{-1}$ gave a median ratio of about $1.01$, which is adequate for a forecast forward model at this stage.
+
+Two alternatives sit beside the direct Eisenstein--Hu call.
+\begin{itemize}
+\item An \textbf{external linear table} can replace the fit.
+The table is interpolated in $\ln k$ and $\ln P$.
+Changes of $A_s$ or $n_s$ rescale the stored spectrum about a pivot; a change of redshift multiplies by the square of the growth ratio.
+This path exists so that a CLASS or CAMB spectrum can be dropped in without rewriting the flux layer.
+\item A \textbf{four-parameter deformation} multiplies the Eisenstein--Hu spectrum by
+$\exp(\alpha L+\beta L^{2}+\gamma L^{3}+\delta L^{4})$ with $L=\ln(k/k_p)$ and $k_p=1\,h\,\mathrm{Mpc}^{-1}$.
+At the pivot the exponential is one, so the amplitude is unchanged.
+Vanishing coefficients recover Eisenstein--Hu exactly.
+This is a smooth way to explore shape freedom without a new Boltzmann run.
+\end{itemize}
+
+\textbf{Code.}
+\texttt{p1d/eisenstein\_hu.py} (\texttt{linear\_matter\_power}, growth, transfer);
+\texttt{p1d/matter\_table.py} (\texttt{TabulatedMatterPower}, \texttt{from\_eisenstein\_hu});
+\texttt{p1d/abgd.py} (\texttt{p1d\_skm\_abgd}).
+
+\subsection{Method 1 --- analytic Kaiser projection}
+
+On scales where the forest behaves as a linearly biased tracer in coherent infall, the three-dimensional flux power is
+\begin{equation}
+P_F(k,\mu)=b_F^{2}\,(1+\beta_F\mu^{2})^{2}\,P_\mathrm{CDM}(k),\qquad
+\mu=\frac{k_\parallel}{k}.
+\end{equation}
+Here $\mu$ is the cosine of the angle between the wavevector and the line of sight.
+The factor $(1+\beta_F\mu^{2})^{2}$ enhances power along the line of sight relative to the transverse plane.
+The numbers $b_F=-0.14$ and $\beta_F=1.4$ are held fixed at every redshift.
+They are a round stand-in for the early DESI large-scale bias; the code does \emph{not} compute $\beta=f/b$ from first principles, and it does \emph{not} apply the $(1+z)^{2.9}$ bias evolution used in eBOSS/DESI analyses.
+McDonald's additional scale-dependent corrections for nonlinear growth, pressure, and nonlinear velocities are also omitted: this path is linear Kaiser only.
+
+A forest spectrum measures only $k_\parallel$, so the transverse modes are integrated out,
+\begin{equation}
+P_{1\mathrm{D}}(k_\parallel)
+=
+\int_{k_\parallel}^{k_\mathrm{max}}
+\frac{k\,\mathrm{d}k}{2\pi}\,
+P_F\!\left(k,\mu=\tfrac{k_\parallel}{k}\right),
+\end{equation}
+with a numerical cutoff $k_\mathrm{max}=30\,h\,\mathrm{Mpc}^{-1}$ and a trapezoidal rule on about 800 logarithmically spaced nodes.
+The integral starts at $k_\parallel$ because a three-dimensional mode cannot contribute to a larger line-of-sight wavenumber than its own $k$.
+The result is deterministic: no random field is drawn, and $P_{1\mathrm{D}}$ is a smooth function of $n_s$ and $A_s$.
+
+\textbf{Code.}
+\texttt{p1d/flux.py}:
+\texttt{flux\_power\_3d}, \texttt{flux\_power\_1d}, \texttt{p1d\_skm}
+(and the unit helpers \texttt{k\_hmpc\_to\_skm}, \texttt{p1d\_h\_to\_kms}).
+The optional argument \texttt{matter\_power=} replaces the internal Eisenstein--Hu call; Part~II uses that hook for Jeans-smoothed tables.
+
+\subsection{Method 2 --- optical-depth sightlines}
+
+The second path builds an explicit transmission field along independent periodic lines.
+The narrative of one evaluation is:
+
+\begin{enumerate}
+\item Project $P_\mathrm{CDM}$ onto one line of sight with \texttt{project\_p1d}.
+That gives the isotropic one-dimensional \emph{matter} power --- still no flux bias.
+\item Draw a Gaussian density contrast $\delta_G$ whose Fourier modes carry exactly that power (\texttt{generate\_gaussian\_skewers}).
+The zero mode is set to zero, so each line has mean contrast zero.
+\item Map to a positive density with the lognormal transformation
+\begin{equation}
+\Delta=\exp\!\left(\delta_G-\tfrac12\mathrm{Var}(\delta_G)\right).
+\end{equation}
+A Gaussian contrast can go below $-1$, so $1+\delta_G$ can be negative; gas density cannot.
+The exponential forces $\Delta>0$.
+Subtracting half the variance keeps the spatial mean of $\Delta$ near one.
+\item Convert density to optical depth with the fluctuating Gunn--Peterson approximation,
+\begin{equation}
+\beta=2-0.7\,(\gamma-1),\qquad
+\tau=A\Delta^{\beta},\qquad
+F=e^{-\tau}.
+\end{equation}
+The default temperature--density index is $\gamma=1.5$, so $\beta=1.65$.
+This $\beta$ is the IGM recombination exponent; it is not the Kaiser $\beta_F$.
+\item Solve for the amplitude $A$ so that the average of $F$ over every pixel of every line equals a target mean transmission (default $0.80$).
+\item Form the flux contrast $\delta_F=F/\langle F\rangle-1$ and measure its periodogram; convert to forest units.
+\end{enumerate}
+
+Optional Gaussian smoothers in pixel units exist for pressure and thermal broadening; in Part~I (and in all Part~II figures) both widths are left at zero.
+Peculiar velocities can be applied by remapping optical depth along the line, but the Part~I comparison lines are real-space lines.
+
+\textbf{Code.}
+\texttt{p1d/projection.py}, \texttt{p1d/skewers.py}, \texttt{p1d/fgpa\_field.py}
+(\texttt{run\_fgpa\_skewers}, \texttt{SkewerConfig}, \texttt{lognormal\_density}, \texttt{calibrate\_mean\_flux}, \ldots).
+
+\subsection{What Part~I figures showed}
+
+Figures 01--06 establish that the matter and Kaiser layers respond sensibly to $n_s$, $A_s$, redshift, the deformation, and table rescaling.
+Figures 07 and 08 are the scientific core of Part~I.
+
+\textbf{Figure 07} puts both flux paths on one page: Eisenstein--Hu $P_\mathrm{CDM}$, the isotropic matter $P_{1\mathrm{D}}$, the Kaiser and FGPA flux spectra in absolute units, and one transmitted-flux skewer.
+The FGPA curve is the mean of 256 lines of length $200\,\mathrm{Mpc}/h$ with 512 pixels; for that ensemble $A\approx 0.485$ and $\langle F\rangle=0.80$.
+In absolute units the Kaiser and FGPA curves do \emph{not} overlie.
+
+\textbf{Figure 08} divides each flux spectrum by its own value at $0.005\,\mathrm{s\,km}^{-1}$.
+Across the forest window the shapes then agree; the residual wiggles on the sightline curve are sampling noise of the finite ensemble.
+
+The narrative conclusion of Part~I is therefore:
+the two methods share matter input and large-scale shape, but they answer different normalisation conditions --- fixed $b_F$ with redshift-space Kaiser factor versus a prescribed mean transmission in real space --- and that difference is visible as a vertical offset, not as a coding inconsistency.
+
+%======================================================================
+\section{Part~II --- narrative}
+%======================================================================
+
+\subsection{What changed after 13 October}
+
+The October discussion did not ask for a rewrite of Part~I.
+It asked for six concrete extensions: a pressure filter; a clearer look at lognormal versus Gaussian density; more sightlines to test the fluctuations; spectra out to $k\sim 0.2\,\mathrm{s\,km}^{-1}$ at $z\sim 5$; a three-dimensional realisation from which $P_F(k,\mu)$ is measured; and a comparison with the nonlinear model of Arinyo-i-Prats et al.\ (2015).
+
+The implementation rule was: leave \texttt{p1d\_skm} and \texttt{run\_fgpa\_skewers} able to reproduce the October calculation when called with no extra arguments, and place each new piece of physics either as a new table passed \emph{into} those functions, or as a new module beside them.
+
+\subsection{Jeans / pressure smoothing}
+
+Gas pressure removes power on small scales.
+Part~II adds that effect as a multiplicative cutoff on the stored matter spectrum,
+\begin{equation}
+P_\mathrm{CDM}(k)\;\to\;P_\mathrm{CDM}(k)\,\exp(-2 x_J^{2} k^{2}),
+\end{equation}
+following the form used by Arya et al.\ in their lognormal forest model.
+The lengths examined are $x_J=0.10\,\mathrm{Mpc}/h$ ($100\,\mathrm{kpc}/h$) and $0.05\,\mathrm{Mpc}/h$ ($50\,\mathrm{kpc}/h$).
+Because the exponent scales as $x_J^{2}$, the longer length removes more power.
+The identity $x_J=0$ recovers the Part~I spectrum at every $k$.
+
+\textbf{Code.}
+\texttt{p1d/jeans.py}:
+\texttt{jeans\_suppression} returns the multiplicative array;
+\texttt{with\_jeans(table, x\_j)} builds a \emph{new} \texttt{TabulatedMatterPower}, copies the fiducial $A_s$, $n_s$, and pivot so Part~I rescaling still works, and leaves the input table untouched.
+That new table is then passed as \texttt{matter\_power=} into \texttt{p1d\_skm}, or as the table argument of \texttt{run\_fgpa\_skewers}.
+
+The older pixel-space Gaussian smoothers remain in the sightline code but are left at zero width in every Part~II figure, so the only small-scale suppression shown is the Jeans factor on $P_\mathrm{CDM}$.
+
+\subsection{Gaussian density versus lognormal density}
+
+The lognormal map was already the density used for optical depth in Part~I.
+Part~II makes the comparison explicit on short, highly resolved lines ($L=40\,\mathrm{Mpc}/h$, $N=1024$), so that the Nyquist mode sits past the Jeans cutoff.
+
+Without a cutoff the Gaussian variance on those lines is large, and about a third of the pixels have $1+\delta_G\le 0$.
+That field cannot be raised to $\Delta^{\beta}$.
+The lognormal field stays positive by construction.
+At $100\,\mathrm{kpc}/h$ the lognormal variance falls to about $2.4$ --- the weakly nonlinear regime the October discussion asked about --- while at $50\,\mathrm{kpc}/h$ the variance rises again because less power was removed.
+In every panel the lognormal one-dimensional spectrum lies above the Gaussian spectrum at high $k_\parallel$: the exponential regenerates small-scale power after the cutoff has removed it from $\delta_G$.
+
+\subsection{Flux power on the smoothed spectrum}
+
+The same three values of $x_J$ are then pushed through both flux paths.
+Below about $0.01\,\mathrm{s\,km}^{-1}$ the three Kaiser curves overlie, and so do the three sightline curves: pressure does not move the large-scale flux amplitude.
+Above that wavenumber, $100\,\mathrm{kpc}/h$ falls first in both panels.
+The sightline spectra fall less steeply than Kaiser, which is the same regeneration of small-scale power, now passed through $F=e^{-\tau}$.
+The amplitude $A$ that restores $\langle F\rangle=0.80$ changes when the lines resolve the power the cutoff removes; that is why $A$ on these short lines differs from the $A\approx 0.485$ of the Part~I figure.
+
+\subsection{Sampling noise of the sightline spectrum}
+
+The fluctuating FGPA curve on 13~October was the average of 256 lines, not of a larger ensemble.
+Part~II repeats that geometry on a single draw of $10\,000$ lines and measures spectra on the first 256, 1024, and 4096 lines and on all $10\,000$.
+Over the forest window the root-mean-square fractional difference from the $10\,000$-line spectrum falls from about $0.067$ at 256 lines to about $0.012$ at 4096 lines, consistent with a scatter that scales roughly as $N_\mathrm{lines}^{-1/2}$.
+
+The vertical offset between the sightline spectrum and the Kaiser spectrum remains at $10\,000$ lines.
+That is the central noise-test result: the October wiggles were sample variance; the Kaiser offset is the flux model (mean transmission $0.80$ in real space versus fixed $b_F$ with RSD).
+
+\subsection{Redshift 5 and small scales}
+
+At $z=5$, $0.2\,\mathrm{s\,km}^{-1}$ corresponds to about $27\,h\,\mathrm{Mpc}^{-1}$ in the fiducial cosmology.
+Lines of length $40\,\mathrm{Mpc}/h$ with 512 pixels have a Nyquist mode past that scale, and the Kaiser integral is carried to $80\,h\,\mathrm{Mpc}^{-1}$ so the upper limit is not sitting on the scale of interest.
+
+The mean transmission is taken from the Faucher-Gigu\`ere power-law fit for the effective optical depth, with metals left in the forest:
+\begin{equation*}
+\tau_\mathrm{eff}(z)=0.0018\,(1+z)^{3.92},\qquad
+\langle F\rangle=e^{-\tau_\mathrm{eff}}.
+\end{equation*}
+That fit was measured on $2\le z\le 4.2$.
+At $z=5$ it is an extrapolation: $\langle F\rangle\approx 0.132$.
+It replaces the value $0.80$ used at $z=3$, because a transmission of $0.80$ is not a redshift-five forest.
+
+The Kaiser panel again shows the Jeans ordering.
+The sightline panel has the same high-$k$ ordering and a much larger amplitude at every plotted $k_\parallel$, because its normalisation is set by $\langle F\rangle=0.132$ while Kaiser's is still set by $b_F=-0.14$.
+
+\subsection{One three-dimensional cube and Arinyo-i-Prats}
+
+The last Part~II piece measures $P_F(k,\mu)$ rather than assuming Kaiser's angular factor.
+One periodic cube of side $40\,\mathrm{Mpc}/h$ and $128^{3}$ cells is drawn at $z=3$ with Jeans length $100\,\mathrm{kpc}/h$.
+Fourier amplitudes are set to the rms of $P(k)$ with a random phase (the same spirit as Arinyo-i-Prats initial conditions), so one box is not limited by a Rayleigh draw.
+The density is mapped to lognormal optical depth; the line-of-sight velocity is the linear continuity field; optical depth is shifted by cloud-in-cell along one axis; $A$ is solved for $\langle F\rangle=0.696$, the value used at $z=3$ in the Arinyo comparison rather than $0.80$.
+
+The published nonlinear model overlaid on that measurement is
+\begin{equation*}
+P_F(k,\mu)=b_{F\delta}^{2}(1+\beta\mu^{2})^{2}\,P_L(k)\,D_1(k,\mu),
+\end{equation*}
+with $D_1$ evaluated at the published fiducial-simulation numbers at $z=3$ ($q_2=0$), not refitted.
+$P_L$ is our Eisenstein--Hu spectrum without an extra Jeans factor, because $D_1$ already contains a pressure scale $k_p$.
+
+An estimator check --- a field constructed as $b_F(1+\beta_F\mu^{2})\delta(\mathbf{k})$ --- recovers analytic Kaiser mode by mode to residuals of order $10^{-13}$, so the binning itself is trusted.
+
+On the figure, the redshift-space cube lies above real space for $\mu$ near 1 and below it for $\mu$ near 0: the Kaiser sense of anisotropy.
+The slope follows the published Arinyo formula.
+The amplitude does not: the lognormal map with an explicit $100\,\mathrm{kpc}/h$ cutoff is a different model from a hydro-calibrated formula on a different cosmology.
+
+\textbf{Code.}
+\texttt{p1d/arinyo.py} (\texttt{flux\_power});
+\texttt{p1d/box3d.py} (\texttt{gaussian\_box}, \texttt{los\_displacement}, \texttt{fgpa\_flux\_box}, \texttt{bin\_power}, \texttt{growth\_rate}).
+Figures 09--12: \texttt{make\_extension\_plots.py}.
+Figures 13--14: \texttt{make\_meeting\_plots.py}.
+
+\subsection{How to reproduce}
+
+From the repository root:
+\begin{verbatim}
+python make_checks.py              # figures 01-08  (Part I)
+python make_extension_plots.py     # figures 09-12
+python make_meeting_plots.py       # figures 13-14
+python -m pytest -q
+\end{verbatim}
+
+%======================================================================
+\section{Code map at a glance}
+%======================================================================
+
+\begin{center}
+\small
+\begin{tabular}{@{}p{0.42\textwidth}p{0.50\textwidth}@{}}
+\toprule
+Operation & Where \\
+\midrule
+Eisenstein--Hu $P_\mathrm{CDM}$, growth &
+\texttt{eisenstein\_hu.py} \\
+Tabulated $P(k)$, $A_s$/$n_s$ rescaling &
+\texttt{matter\_table.py} \\
+Shape deformation $\alpha$--$\delta$ &
+\texttt{abgd.py} \\
+Kaiser $P_F$ and $P_{1\mathrm{D}}$ &
+\texttt{flux.py} (\texttt{p1d\_skm}) \\
+Isotropic 1D projection &
+\texttt{projection.py} \\
+Gaussian lines, periodogram &
+\texttt{skewers.py} \\
+Lognormal + FGPA + mean-$F$ solve &
+\texttt{fgpa\_field.py} (\texttt{run\_fgpa\_skewers}) \\
+Jeans factor on a table &
+\texttt{jeans.py} (\texttt{with\_jeans}) \\
+Arinyo $D_1$ formula &
+\texttt{arinyo.py} \\
+3D Gaussian box, RSD, $P(k,\mu)$ &
+\texttt{box3d.py} \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+Three entry points matter for discussion:
+\begin{enumerate}
+\item \texttt{p1d\_skm} --- analytic Kaiser $P_{1\mathrm{D}}$ (optional screened table via \texttt{matter\_power=});
+\item \texttt{run\_fgpa\_skewers} --- optical-depth sightlines from a table;
+\item \texttt{fgpa\_flux\_box} + \texttt{bin\_power} --- measured $P_F(k,\mu)$, with Arinyo overlay from \texttt{arinyo.flux\_power}.
+\end{enumerate}
+
+%======================================================================
+\section{Open questions and decisions}
+%======================================================================
+
+\subsection{Decisions needed before the next stage}
+
+The forward model for auto-$P_{1\mathrm{D}}$ now exists in analytic, sightline, and one-box forms.
+Before cross-power and Fisher work, the following choices change what gets coded next.
+
+\begin{enumerate}
+\item \textbf{Normalisation of Kaiser versus mean transmission.}
+Should $b_F=-0.14$ remain fixed, or should $b_F$ (and $\beta_F$) be retuned so that large-scale real-space flux matches the FGPA / cube at a chosen $\langle F\rangle$?
+Figure~12 shows that more sightlines will not remove the present offset.
+\item \textbf{Mean transmission at $z=5$.}
+Keep the Faucher-Gigu\`ere extrapolation ($\langle F\rangle\sim 0.13$), hold $0.80$ to isolate growth and units, or adopt another $\langle F\rangle(z)$?
+\item \textbf{Jeans length.}
+Fix $x_J=100\,\mathrm{kpc}/h$ for forecasts, promote it to a nuisance parameter, or drop the explicit cutoff and rely on Arinyo's $k_p$ only?
+\item \textbf{Arinyo comparison.}
+Stay with published fiducial numbers, refit $q_1$, $k_p$, and biases on our cosmology, or move to a hydro / emulator target?
+\item \textbf{3D fidelity.}
+Is one $40\,\mathrm{Mpc}/h$, $128^{3}$ box enough for shape checks, or is a larger volume / higher resolution required before trusting modes near $k_p$?
+\item \textbf{Velocities and thermal broadening.}
+Add thermal broadening and/or nonlinear RSD next, or keep linear continuity until the Fisher pipeline exists?
+\item \textbf{Order of forecast ingredients.}
+Cross-power with quasars/galaxies first, then covariance, then Fisher --- or the covariance of $P_{1\mathrm{D}}$ alone first?
+\item \textbf{Which forward model enters the Fisher matrix?}
+Analytic Kaiser, FGPA ensemble, Arinyo $D_1$, or the 3D lognormal box?
+\item \textbf{Parameters to vary.}
+Only $n_s$ and $A_s$, or also IGM / bias parameters ($A$, $\gamma$, $x_J$, $b_F$, $\beta_F$)?
+\end{enumerate}
+
+\subsection{Likely questions in the meeting, with short answers}
+
+\paragraph{Why don't Kaiser and FGPA match in absolute power?}
+They share $P_\mathrm{CDM}$ and large-scale shape (fig.~08), but not normalisation.
+Kaiser is set by $b_F^{2}$ and includes RSD through $\beta_F$; the sightlines are set by $\langle F\rangle$ in real space.
+Figure~12 shows the offset survives $10\,000$ lines, so it is not sample variance.
+
+\paragraph{Is the lognormal description adequate?}
+It gives a positive density and, with a $100\,\mathrm{kpc}/h$ cutoff, a weakly nonlinear variance.
+It is not a hydrodynamic simulation.
+Arya et al.\ document where a plain lognormal fails (flux PDF, strong overdensities, missing long modes).
+
+\paragraph{Why does the cube lie above Arinyo?}
+Different physical model (lognormal + explicit Jeans versus hydro-calibrated $D_1$), different cosmology, published parameters not refitted.
+The anisotropy has the right sense and the slope is similar; the amplitude is not a match to claim yet.
+
+\paragraph{What should come next?}
+The three highest-leverage decisions are normalisation, $\langle F\rangle(z=5)$, and which forward model enters Fisher.
+A sensible default proposal, if the meeting wants one: lock those three, then build cross-power, then covariance, then Fisher.
+
+%======================================================================
+\section{10-minute presentation script}
+%======================================================================
+
+\paragraph{Audience.} Kier, Vera, Simeon.
+\paragraph{Length.} About ten minutes speaking, then discussion.
+\paragraph{Props.} This PDF or the Part~I / Part~II notes; figures 07 and 09--14 within reach.
+
+\begin{center}
+\small
+\begin{tabular}{@{}p{0.18\textwidth}p{0.72\textwidth}@{}}
+\toprule
+Time & Block \\
+\midrule
+0:00--0:50 & Opening and scope \\
+0:50--3:15 & Part~I narrative (two methods, figs~07--08) \\
+3:15--7:45 & Part~II narrative (six requests and findings) \\
+7:45--9:00 & Code entry points and how to reproduce \\
+9:00--10:00 & Three decisions asked of the meeting \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\subsection*{[0:00] Opening ($\sim$50\,s)}
+
+Thank you Kier, Vera, Simeon.
+This is a short summary of the Lyman-$\alpha$ $P_{1\mathrm{D}}$ forward model.
+
+I will do three things.
+First, remind you what Part~I already contained before 13~October.
+Second, walk through what I implemented from your six requests, and what the new figures show.
+Third, ask for guidance on a few decisions that should be locked before cross-power, covariance, and Fisher.
+
+I am not presenting a Fisher matrix today.
+The scope is the auto flux-power forward model and the Part~II extensions.
+
+\subsection*{[0:50] Part~I ($\sim$2\,min~25\,s)}
+
+The calculator lives in the \texttt{p1d} package.
+The inputs are $n_s$, $A_s$, and a linear $P_\mathrm{CDM}$.
+The output is one-dimensional flux power in forest units, at one redshift.
+
+The matter spectrum defaults to Eisenstein--Hu.
+I can also load an external linear table and rescale it, or apply a smooth four-parameter shape deformation about a pivot.
+
+There are two flux paths, both fed by the same $P_\mathrm{CDM}$.
+
+Method~1 is analytic Kaiser, in \texttt{p1d\_skm}.
+On large scales the forest is a linearly biased tracer with coherent velocities:
+$P_F=b_F^{2}(1+\beta_F\mu^{2})^{2}P_\mathrm{CDM}$, with $b_F=-0.14$ and $\beta_F=1.4$ fixed.
+I integrate out the transverse modes to get $P_{1\mathrm{D}}(k_\parallel)$.
+There is no random field; the result is smooth in cosmology.
+
+Method~2 builds transmission along independent lines, in \texttt{run\_fgpa\_skewers}.
+I project $P_\mathrm{CDM}$ to one dimension, draw a Gaussian contrast, map it to a lognormal density so the density stays positive, set $\tau=A\Delta^{1.65}$, solve $A$ so the mean transmission is $0.80$, and measure the flux power from those lines.
+
+Figure~07 is the Part~I summary.
+Same matter spectrum into both paths; in absolute units the curves do not overlie.
+Figure~08 divides each spectrum by its large-scale amplitude: the shapes then agree.
+So the October offset was a difference of flux normalisation, not a bug in the matter layer.
+
+\subsection*{[3:15] Part~II ($\sim$4\,min~30\,s)}
+
+I did not rewrite Part~I.
+Each extension is either a new table passed into those functions, or a new module beside them.
+
+\textbf{Pressure.}
+In \texttt{jeans.py} I multiply a stored $P_\mathrm{CDM}$ by $\exp(-2 x_J^{2} k^{2})$.
+I used $100$ and $50\,\mathrm{kpc}/h$.
+\texttt{with\_jeans} returns a new table and leaves the original untouched.
+That table can go into Kaiser or into the sightlines.
+
+Figure~09: large scales unchanged; $100\,\mathrm{kpc}/h$ falls first.
+Figure~10: without a cutoff, about a third of Gaussian pixels are negative --- unusable for $\Delta^{\beta}$.
+At $100\,\mathrm{kpc}/h$ the lognormal variance is about two, so weakly nonlinear.
+The lognormal always keeps more small-scale power than the Gaussian after the cutoff.
+Figure~11: the same cutoff in flux space; sightlines fall less steeply than Kaiser at high $k$.
+
+\textbf{Noise --- Figure~12.}
+October's fluctuating curve was 256 lines.
+I went to $10\,000$.
+The scatter falls roughly as one over square root of $N$.
+The vertical offset from Kaiser is still present at $10\,000$ lines.
+So the wiggles were sample variance; the offset is the flux model.
+
+\textbf{Redshift~5 --- Figure~13.}
+The spectra reach $0.2\,\mathrm{s\,km}^{-1}$.
+Mean transmission $0.13$ comes from the Faucher-Gigu\`ere fit extrapolated past $z=4.2$.
+Sightline power sits far above Kaiser because those two amplitudes answer different conditions.
+
+\textbf{Three-dimensional box --- Figure~14.}
+One $40\,\mathrm{Mpc}/h$, $128^{3}$ cube, Jeans $100\,\mathrm{kpc}/h$, mean transmission $0.696$.
+Linear continuity velocities; measured $P_F(k,\mu)$.
+Parallel power above real space, transverse below --- Kaiser sense of anisotropy.
+The slope follows the published Arinyo-i-Prats formula at their $z=3$ parameters; the amplitude lies above it.
+I have not refitted their numbers.
+The box is small, and thermal broadening is still off.
+
+\subsection*{[7:45] Code map ($\sim$1\,min~15\,s)}
+
+Three entry points:
+\begin{enumerate}
+\item \texttt{p1d\_skm} --- analytic Kaiser, optional Jeans table through \texttt{matter\_power};
+\item \texttt{run\_fgpa\_skewers} --- optical-depth sightlines from a table;
+\item \texttt{box3d} plus \texttt{arinyo} --- measured $P_F(k,\mu)$ and the published nonlinear overlay.
+\end{enumerate}
+
+To reproduce the figures:
+\texttt{make\_checks.py} for 01--08,
+\texttt{make\_extension\_plots.py} for 09--12,
+\texttt{make\_meeting\_plots.py} for 13--14,
+and \texttt{pytest} for the unit tests.
+The written notes with equations, references, and figures are Parts~I and~II.
+
+\subsection*{[9:00] What I need from you ($\sim$1\,min)}
+
+Before I start cross-power and Fisher, three decisions would help most.
+
+First: how should we normalise Kaiser versus mean transmission --- keep $b_F=-0.14$, or match large-scale amplitude to the FGPA or the cube?
+
+Second: what mean transmission should we use at $z=5$ --- the extrapolated Faucher-Gigu\`ere value, or something else?
+
+Third: which forward model should enter the forecast first --- analytic Kaiser, FGPA, Arinyo, or the three-dimensional box?
+
+I am happy to take questions, or to walk any figure in more detail.
+
+\subsection*{Backup answers}
+
+\paragraph{If asked for a sightline.}
+Bottom-right of figure~07, or the later $A_s$/$n_s$ overlays in \texttt{plots/15}--\texttt{19}.
+When $\langle F\rangle$ is held fixed the differences in $F(x)$ are subtle; $\Delta F$ panels make them clearer.
+A matched dramatic test uses $A_s\times 0.5$ against $n_s\approx 0.806$, chosen so both cut the Gaussian density variance by the same factor.
+
+\paragraph{If asked whether this is Fisher-ready.}
+The auto-$P_{1\mathrm{D}}$ forward model exists in two (and partly three) forms.
+Cross-power, survey window, noise, and covariance are not implemented yet.
+
+\paragraph{If asked what is still missing.}
+No thermal broadening in the Part~II figures; cube velocities are linear only; one small box; Arinyo parameters not refit; $z=5$ mean flux is an extrapolation; no $P_x$, no covariance, no Fisher.
+
+\subsection*{Checklist before the call}
+
+\begin{itemize}
+\item[$\square$] This PDF, or Part~I / Part~II, open.
+\item[$\square$] Figures 07 and 09--14 reachable in one click.
+\item[$\square$] The three decision questions memorised.
+\item[$\square$] \texttt{pytest} green if someone asks about tests.
+\end{itemize}
+
+\end{document}

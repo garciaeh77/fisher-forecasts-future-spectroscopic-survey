@@ -1,0 +1,314 @@
+\documentclass[11pt]{article}
+
+\usepackage{amsmath,amssymb}
+\usepackage{booktabs}
+\usepackage{geometry}
+\usepackage{hyperref}
+\usepackage[numbers,sort&compress]{natbib}
+
+\geometry{margin=1in}
+\hypersetup{colorlinks=true,linkcolor=blue,citecolor=blue,urlcolor=blue}
+
+\title{Steps used to build the analytic and skewer\\ Lyman-alpha $P_{1\mathrm{D}}$ pipelines}
+\author{Helena}
+\date{13 October 2026}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+The task was a calculator. The inputs are the primordial parameters $n_s$ and $A_s$ and a cold-dark-matter spectrum $P_\mathrm{CDM}$. The output is the one-dimensional Lyman-alpha flux power $P_{1\mathrm{D}}(k_\parallel,z)$, with $k_\parallel$ in $\mathrm{s\,km}^{-1}$ and $P_{1\mathrm{D}}$ in $\mathrm{km\,s}^{-1}$. Two flux models share that matter spectrum. The analytic path is the Kaiser formula and a line-of-sight integral. The skewer path draws one-dimensional lines, applies the fluctuating Gunn--Peterson approximation, and measures the flux power. This note records every step, the equation used at that step, the assumptions, and the references. The cross-power $P_x$, the covariance, and the Fisher matrix are not in this calculation.
+\end{abstract}
+
+\section{What is delivered}
+\label{sec:task}
+
+One evaluation is at one redshift. The fiducial point used for the checks is
+\begin{equation}
+\begin{aligned}
+\Omega_m &= 0.31, &
+\Omega_b &= 0.049, &
+h &= 0.67, \\
+n_s &= 0.965, &
+A_s &= 2.1\times 10^{-9}, &
+z &= 3.
+\end{aligned}
+\end{equation}
+These cosmological numbers are a rounded Planck-like choice, held fixed so that every check uses the same input. $P_\mathrm{CDM}$ can be built in three ways: the Eisenstein--Hu transfer function, a table read from a file (CLASS or CAMB), or the Eisenstein--Hu spectrum multiplied by a four-parameter bend.
+
+Both pipelines then answer the same question: given that matter spectrum, what is the one-dimensional flux power. They do it at different points. The analytic path converts matter to flux before the line-of-sight integral. The skewer path integrates the matter spectrum first, builds lines, and only then converts density to flux.
+
+\section{Shared step: the linear matter spectrum}
+\label{sec:matter}
+
+\subsection{Eisenstein--Hu transfer function}
+
+The default three-dimensional spectrum is linear cold dark matter with the Eisenstein and Hu fitting formula \cite{Eisenstein:1997ik}. Wavenumbers passed into the transfer function are in $\mathrm{Mpc}^{-1}$, without $h$. The fit is normalised so that
+\begin{equation}
+T(k\to 0) = 1,
+\end{equation}
+and it includes the baryon acoustic oscillations. The internal fitting expressions for $T(k)$ are those of Eisenstein and Hu; they are not re-derived here.
+
+\subsection{Primordial amplitude and growth}
+
+The linear power in $\mathrm{Mpc}^{3}$ is
+\begin{equation}
+\label{eq:pcdm}
+P(k,z)
+=
+\frac{8\pi^{2}}{25}
+\frac{A_s}{\Omega_m^{2} H_0^{4}}
+\left(\frac{k}{k_\mathrm{pivot}}\right)^{n_s-1}
+k\,T(k)^{2}\,D(z)^{2}.
+\end{equation}
+The pivot is the standard primordial pivot,
+\begin{equation}
+k_\mathrm{pivot} = 0.05\,\mathrm{Mpc}^{-1}.
+\end{equation}
+$H_0$ is expressed in $\mathrm{Mpc}^{-1}$,
+\begin{equation}
+H_0 = \frac{100\,h}{299792.458}.
+\end{equation}
+Multiplication by $h^{3}$ converts Eq.~\eqref{eq:pcdm} to $(\mathrm{Mpc}/h)^{3}$, which is the unit used everywhere below. The wavenumber in that unit is $k_h = k/h$.
+
+The growth factor $D(z)$ is the integral solution of the linear growth equation in a flat universe with constant dark energy. It is normalised so that $D(a)\to a$ deep in matter domination. It is not normalised to $D(0)=1$. The Hubble rate used for growth and for the later unit conversion is
+\begin{equation}
+\label{eq:hubble}
+H(z) = 100\,h\sqrt{\Omega_m(1+z)^{3}+(1-\Omega_m)}
+\quad[\mathrm{km\,s}^{-1}\,\mathrm{Mpc}^{-1}].
+\end{equation}
+Neutrino masses are not included. The universe is flat, with $\Omega_\Lambda = 1-\Omega_m$.
+
+\subsection{A table instead of the fitting formula}
+
+A whitespace-separated file with two columns may replace Eq.~\eqref{eq:pcdm}. Column one is $k$ in $h\,\mathrm{Mpc}^{-1}$. Column two is the linear $P(k)$ in $(\mathrm{Mpc}/h)^{3}$ at one fiducial redshift, already containing the fiducial $n_s$ and $A_s$. At least four strictly increasing positive rows are required, and $P>0$. Values are interpolated with a monotone cubic interpolant in $\ln k$ and $\ln P$. No extrapolation is allowed: a requested $k$ outside the file stops the calculation.
+
+A later change of amplitude, tilt, or redshift rescales the table,
+\begin{equation}
+\label{eq:table}
+P(k)
+=
+P_\mathrm{fid}(k)
+\left(\frac{A_s}{A_{s,\mathrm{fid}}}\right)
+\left(\frac{k}{k_p}\right)^{n_s-n_{s,\mathrm{fid}}}
+\left(\frac{D(z)}{D(z_\mathrm{fid})}\right)^{2}.
+\end{equation}
+The pivot in $h\,\mathrm{Mpc}^{-1}$ is $k_p = 0.05/h$, so that it matches $k_\mathrm{pivot}=0.05\,\mathrm{Mpc}^{-1}$. If the file is already at the redshift of the call, the growth ratio is $1$.
+
+CLASS often writes $k$ in $\mathrm{Mpc}^{-1}$ and $P$ in $\mathrm{Mpc}^{3}$. Those files have to be converted before reading,
+\begin{equation}
+k_h = k/h, \qquad P_h = P\,h^{3}.
+\end{equation}
+CAMB's matter-power output is already in $h$ units. The file must be the linear spectrum, not the nonlinear one.
+
+\subsection{Optional four-parameter bend}
+
+The task also asked for an $\alpha$--$\beta$--$\gamma$--$\delta$ shape. It is a smooth multiplier on the Eisenstein--Hu spectrum,
+\begin{equation}
+\label{eq:abgd}
+P(k) = P_\mathrm{EH}(k)\,
+\exp\!\left(\alpha L + \beta L^{2} + \gamma L^{3} + \delta L^{4}\right),
+\qquad
+L = \ln(k/k_p),
+\end{equation}
+with $k_p = 1\,h\,\mathrm{Mpc}^{-1}$. At that pivot the exponential equals $1$, so the amplitude remains the Eisenstein--Hu amplitude. Setting all four coefficients to zero returns $P_\mathrm{EH}$ exactly. These coefficients are shape parameters. They are not the IGM temperature--density index $\gamma$ of Sec.~\ref{sec:fgpa}. The bend does not add a sharp small-scale cutoff.
+
+\section{Analytic pipeline}
+\label{sec:kaiser}
+
+\subsection{Kaiser flux power}
+
+On large scales the forest is treated as a linearly biased tracer of the dark matter, with coherent peculiar velocities \cite{Kaiser:1987qv,McDonald:2001fe}. The three-dimensional flux power is
+\begin{equation}
+\label{eq:kaiser}
+P_F(k,\mu)
+=
+b_F^{2}\,(1+\beta_F\mu^{2})^{2}\,P_\mathrm{CDM}(k).
+\end{equation}
+The direction cosine is
+\begin{equation}
+\mu = k_\parallel / k.
+\end{equation}
+The two flux parameters are fixed numbers,
+\begin{equation}
+b_F = -0.14, \qquad \beta_F = 1.4.
+\end{equation}
+$b_F$ is negative because a denser patch absorbs more light and transmits less. In Kaiser's derivation $\beta = f/b$, with $f$ the growth rate. This calculation does not evaluate that ratio. The pair $(-0.14,\,1.4)$ is a round stand-in for the large-scale forest bias. Early DESI data give $b_{\mathrm{Ly}\alpha}=-0.134\pm 0.009$ and $\beta_{\mathrm{Ly}\alpha}=1.41^{+0.12}_{-0.15}$ from the combined auto- and cross-correlation \cite{Gordon:2023dua}. The same parameters are held fixed at every redshift: the evolution $b(z)\propto (1+z)^{2.9}$ used in the eBOSS and DESI analyses \cite{eBOSS:2020tmo} is not applied. McDonald's small-scale corrections for nonlinear growth, gas pressure, and nonlinear velocities \cite{McDonald:2001fe} are not applied either. Equation~\eqref{eq:kaiser} is linear Kaiser only.
+
+This path never builds a density and never evaluates an optical depth. Equation~\eqref{eq:kaiser} is the small-fluctuation limit of the optical-depth model in Sec.~\ref{sec:fgpa}, not a fit of $b_F$ to that model. With the skewer normalisation below, the linear response would be closer to $b_F\sim -A\beta\approx -0.8$. The value $-0.14$ is the measured large-scale bias, after the smoothing that the skewers leave out.
+
+\subsection{Line-of-sight integral}
+
+A forest spectrum sees only the line-of-sight direction. Perpendicular modes are integrated out,
+\begin{equation}
+\label{eq:p1d-kaiser}
+P_{1\mathrm{D}}(k_\parallel)
+=
+\int_{k_\parallel}^{k_\mathrm{max}}
+\frac{k\,\mathrm{d}k}{2\pi}\,
+P_F\!\left(k,\mu=\frac{k_\parallel}{k}\right).
+\end{equation}
+The upper limit is a numerical cutoff,
+\begin{equation}
+k_\mathrm{max} = 30\,h\,\mathrm{Mpc}^{-1},
+\end{equation}
+sampled with 800 logarithmically spaced points and a trapezoidal rule. The integral starts at $k_\parallel$ because a three-dimensional mode cannot contribute to a line-of-sight wavenumber larger than its own $k$. The factor $k\,\mathrm{d}k/(2\pi)$ is the ring of perpendicular modes at fixed $k_\parallel$.
+
+$k_\mathrm{max}$ is not a measured forest scale. The one-dimensional forest power used by BOSS, eBOSS, and DESI, and in the check plots, spans
+\begin{equation}
+k_\parallel \sim 10^{-3}\ \mathrm{to}\ 0.02\ \mathrm{s\,km}^{-1}.
+\end{equation}
+At $z=3$ in the fiducial cosmology, $H(z)/[(1+z)h]\approx 113\,\mathrm{km\,s}^{-1}$ per $\mathrm{Mpc}/h$, so that range is about $0.11$ to $2.3\,h\,\mathrm{Mpc}^{-1}$, or wavelengths of about $55$ down to $3\,\mathrm{Mpc}/h$. The integral extends past those points because small-scale power still contributes to a lower $k_\parallel$. Raising $k_\mathrm{max}$ until $P_{1\mathrm{D}}$ stops changing is the practical test of the cutoff. Gas pressure removes power around $10$--$20\,h\,\mathrm{Mpc}^{-1}$ \cite{McDonald:2001fe}; integrating the unsmoothed Eq.~\eqref{eq:kaiser} out to $30\,h\,\mathrm{Mpc}^{-1}$ keeps power that the gas does not have.
+
+\subsection{Forest units}
+
+The conversion between comoving $h\,\mathrm{Mpc}^{-1}$ and the spectrograph velocity unit is
+\begin{equation}
+\label{eq:units}
+\frac{\mathrm{d}v}{\mathrm{d}\chi}
+=
+\frac{H(z)}{(1+z)\,h}
+\quad[\mathrm{km\,s}^{-1}\ \mathrm{per}\ \mathrm{Mpc}/h],
+\end{equation}
+with $H(z)$ from Eq.~\eqref{eq:hubble}. Then
+\begin{equation}
+k_h = k_{\mathrm{s/km}}\times \frac{\mathrm{d}v}{\mathrm{d}\chi},
+\qquad
+P_{1\mathrm{D}}[\mathrm{km\,s}^{-1}]
+=
+P_{1\mathrm{D}}[\mathrm{Mpc}/h]\times \frac{\mathrm{d}v}{\mathrm{d}\chi}.
+\end{equation}
+The analytic output is this $P_{1\mathrm{D}}$ in $\mathrm{km\,s}^{-1}$.
+
+\subsection{Where the Kaiser formula stops holding}
+
+The formula assumes a small density contrast, so that the flux contrast is proportional to $\delta$, and a coherent infall, which is the regime Kaiser derived. It fails in four places that matter for the forest.
+\begin{itemize}
+\item The map $F=e^{-\tau}$ is linear only for a small $\delta$. Saturated lines stop responding once the pixel is already dark.
+\item Random thermal and turbulent motions suppress power at $\mu\sim 1$ on small scales. That suppression is in McDonald's correction \cite{McDonald:2001fe} and is absent here.
+\item Pressure and thermal broadening remove small-scale power. The bare Kaiser spectrum does not.
+\item One constant $b_F$ cannot describe strong overdensities or gas near galaxies, where the optical-depth rule itself fails \cite{Kooistra:2022hzw}.
+\end{itemize}
+The shape of the response to $n_s$ and $A_s$ on the largest forest scales is what this path is for. The absolute $P_{1\mathrm{D}}$ near $0.02\,\mathrm{s\,km}^{-1}$ uses the formula outside that regime.
+
+\section{Skewer pipeline}
+\label{sec:skewers}
+
+The skewer path uses the same $P_\mathrm{CDM}$ and then builds explicit lines of sight. It does not build a three-dimensional cube.
+
+\subsection{From the three-dimensional spectrum to one line}
+
+A Gaussian cube with power $P_\mathrm{CDM}(k)$ would be filled in Fourier space and transformed back, and a skewer would be one row of that cube. For an isotropic spectrum the power along one row is fixed before the cube exists,
+\begin{equation}
+\label{eq:p1d-matter}
+P_{1\mathrm{D},\mathrm{matter}}(k_\parallel)
+=
+\frac{1}{2\pi}
+\int_{k_\parallel}^{q_\mathrm{max}}
+q\,P_\mathrm{CDM}(q)\,\mathrm{d}q.
+\end{equation}
+There is no $b_F$ and no $\mu$ in this integrand. The upper limit is the last $k$ in the matter table, not the $30\,h\,\mathrm{Mpc}^{-1}$ of Eq.~\eqref{eq:p1d-kaiser}. The lines are then drawn in one dimension so that they carry Eq.~\eqref{eq:p1d-matter}.
+
+Statistically, one such line matches one row cut from an isotropic Gaussian cube. Neighbouring rows in a cube pass through the same clumps. These lines are drawn independently, so they are uncorrelated, and there is no transverse velocity field.
+
+\subsection{Drawing one line}
+
+A line is periodic, of length $L$, with $N$ pixels. The pixel size and the highest resolved wavenumber are
+\begin{equation}
+\mathrm{d}x = L/N,
+\qquad
+k_\mathrm{Nyquist} = \pi\,N/L.
+\end{equation}
+The check in the summary figure uses $L=200\,\mathrm{Mpc}/h$ and $N=512$, so $\mathrm{d}x=0.391\,\mathrm{Mpc}/h$ and $k_\mathrm{Nyquist}\approx 8\,h\,\mathrm{Mpc}^{-1}$. At $z=3$ that pixel is about $44\,\mathrm{km\,s}^{-1}$ wide. The longest wave on the line is $2\pi/L$. The matter table must cover from that fundamental mode through the Nyquist mode.
+
+The line is not filled pixel by pixel. Each Fourier mode with $k>0$ is a complex Gaussian number whose variance is set by $P_{1\mathrm{D},\mathrm{matter}}(k)$. The constant mode is set to zero, so the line fluctuates about zero. An inverse Fourier transform gives the Gaussian contrast $\delta_G(x)$. The random seed only makes the draw repeatable. The plotted check uses 256 lines and seed 7. The noise on the measured flux power falls as $1/\sqrt{N_\mathrm{lines}}$.
+
+An optional Gaussian smooth of $\delta_G$, with width given in pixels, stands in for pressure smoothing. Its default width is zero.
+
+\subsection{Lognormal density and optical depth}
+\label{sec:fgpa}
+
+The Gaussian contrast is mapped to a positive density with mean near one \cite{Bi:1996fh,Coles:1991if},
+\begin{equation}
+\label{eq:lognormal}
+\Delta = \exp\!\left(\delta_G - \tfrac{1}{2}\mathrm{Var}(\delta_G)\right).
+\end{equation}
+The optical depth follows the fluctuating Gunn--Peterson approximation \cite{Gunn:1965hd,Bi:1996fh,Hui:1997dp}. Photoionization equilibrium and the temperature--density relation $T\propto\Delta^{\gamma-1}$, together with a recombination rate $\propto T^{-0.7}$, give
+\begin{equation}
+\label{eq:beta}
+\beta = 2 - 0.7\,(\gamma - 1),
+\qquad
+\tau = A\,\Delta^{\beta},
+\qquad
+F = e^{-\tau}.
+\end{equation}
+The fiducial temperature--density index is $\gamma=1.5$, so $\beta=1.65$. This $\beta$ is the IGM exponent. It is not the Kaiser parameter $\beta_F$. Kooistra, Lee, and Horowitz use the same exponent \cite{Kooistra:2022hzw}. Arya et al.\ use the same lognormal-to-flux sequence, with a Jeans cutoff and an amplitude set by temperature and the photoionization rate \cite{Arya:2022uke}.
+
+$A$ is not taken from that physical expression. It is solved so that the mean transmitted flux, averaged over every pixel of every line, equals a chosen target,
+\begin{equation}
+\label{eq:meanflux}
+\left\langle e^{-A\,\Delta^{\beta}} \right\rangle = \bar F.
+\end{equation}
+The target used in the checks is $\bar F = 0.80$. The root is unique because the mean flux falls as $A$ increases. For the plotted lines the solution is $A=0.485$. The target is an input, not a function of redshift. At $z=3$ the observed mean transmission is somewhat lower, closer to $0.7$.
+
+Peculiar velocities are applied only if an external pixel displacement is supplied. The displacement remaps $\tau$ with periodic cloud-in-cell assignment. The checks do not supply one, so those lines are real space. An optional Gaussian smooth of $\tau$, also off by default, stands in for thermal broadening. It is not a Voigt profile, and it does not vary from pixel to pixel.
+
+\subsection{Measured flux power}
+
+The flux contrast on the lines is
+\begin{equation}
+\delta_F = F/\langle F\rangle - 1.
+\end{equation}
+Its one-dimensional power is the average, over the lines, of the squared Fourier amplitude,
+\begin{equation}
+\label{eq:measure}
+P_{1\mathrm{D}}(k)
+=
+\frac{(\mathrm{d}x)^{2}}{L}
+\left\langle \left|\tilde\delta_F(k)\right|^{2} \right\rangle,
+\end{equation}
+in $\mathrm{Mpc}/h$. The same factor Eq.~\eqref{eq:units} converts $k$ to $\mathrm{s\,km}^{-1}$ and $P_{1\mathrm{D}}$ to $\mathrm{km\,s}^{-1}$. This spectrum is a measurement, not another integral of a three-dimensional flux power.
+
+\subsection{Density variance and the papers' caveats}
+
+With pressure smoothing left off, the lognormal density variance on these lines is about $19$. That is far outside the small-fluctuation assumption behind Eq.~\eqref{eq:kaiser}. Arya et al.\ suppress the small-scale matter power with a Jeans factor before the lognormal map \cite{Arya:2022uke}. The switch for that smoothing exists and is off. Kooistra, Lee, and Horowitz show that $\tau\propto\Delta^{\beta}$ already fails in strong overdensities and where galactic feedback matters \cite{Kooistra:2022hzw}. Neither effect is modelled.
+
+\section{Why the two flux spectra differ}
+\label{sec:compare}
+
+On the summary figure the analytic curve and the skewer curve are both $P_{1\mathrm{D}}$ in $\mathrm{km\,s}^{-1}$ at $z=3$. They are not expected to lie on top of each other.
+\begin{itemize}
+\item The analytic height is $b_F^{2}$ with $b_F=-0.14$, times the velocity factor. The skewer height is fixed by $\bar F=0.80$ through Eq.~\eqref{eq:meanflux}.
+\item The analytic spectrum includes peculiar velocities. The plotted skewers are real space.
+\item The analytic spectrum is linear. The skewers use the exponential $e^{-\tau}$ on a field with density variance about $19$.
+\item The skewer curve is an average of 256 finite lines, so it is noisy. The analytic curve is not random.
+\end{itemize}
+Dividing each curve by its own value at $0.005\,\mathrm{s\,km}^{-1}$ removes the normalisation. The shapes then follow each other. For a small, smoothed, real-space field the two would agree in amplitude as well, with $b_F=-A\beta$ and $\beta_F=0$. Matching the factor $(1+\beta_F\mu^{2})^{2}$ requires velocities that know about modes perpendicular to the line of sight. Independent one-dimensional lines do not have those modes.
+
+A one percent increase in $A_s$ raises the analytic $P_{1\mathrm{D}}$ by one percent at every $k_\parallel$. A change in $n_s$ tilts it. That flat amplitude response is the property a later Fisher forecast needs, which is why derivatives would be taken on the analytic path. The skewer power depends on the random seed.
+
+\section{Assumptions, collected}
+\label{sec:assumptions}
+
+\begin{enumerate}
+\item Flat $\Lambda$CDM, no massive neutrinos, linear matter power only.
+\item Eisenstein--Hu $T(k)$ with $T(0)=1$, including baryon oscillations \cite{Eisenstein:1997ik}. It is a fit, not a Boltzmann solution. A CLASS or CAMB table can replace it through Eq.~\eqref{eq:table}.
+\item Growth normalised by $D(a)\to a$ in matter domination, not by $D(0)=1$.
+\item One redshift per evaluation. $b_F$, $\beta_F$, $\gamma$, and $\bar F$ do not evolve inside a call.
+\item Analytic flux power is linear Kaiser, Eq.~\eqref{eq:kaiser}, with fixed $b_F=-0.14$ and $\beta_F=1.4$ \cite{Kaiser:1987qv,McDonald:2001fe,Gordon:2023dua}. No McDonald small-scale correction.
+\item The analytic integral stops at $30\,h\,\mathrm{Mpc}^{-1}$ by choice.
+\item Skewers are independent periodic lines, not rows of one cube. No transverse correlations.
+\item Real space, unless an external displacement is passed in. Pressure and thermal smoothing default to zero.
+\item Lognormal density, Eq.~\eqref{eq:lognormal} \cite{Bi:1996fh}. Optical depth Eq.~\eqref{eq:beta} with $\gamma=1.5$ \cite{Hui:1997dp,Kooistra:2022hzw}. $A$ is fit to $\bar F=0.80$, not computed from $T_0$ and the photoionization rate \cite{Arya:2022uke}.
+\item The $\alpha\beta\gamma\delta$ coefficients in Eq.~\eqref{eq:abgd}, if used, are a smooth shape and not the IGM $\gamma$.
+\item Tables are not extrapolated.
+\end{enumerate}
+
+\section{What this calculation does not contain}
+
+The cross-power of the forest with quasars or galaxies, the covariance, survey area, number densities, resolution, noise, and the Fisher matrix are the next stage. The covariance of the one-dimensional flux power across redshift bins, including the effect of the longest waves along a sightline, is studied with this same lognormal model by Arya, Paranjape and Choudhury \cite{Arya:2023ipe}. LaCE, LyaCoLoRe, cup1d, P1D\_Mocks, and qsotools are not part of the calculator. LaCE emulates hydrodynamic spectra. LyaCoLoRe builds a three-dimensional mock and is the relevant comparison when correlated sightlines are required. P1D\_Mocks and qsotools start from a $P_{1\mathrm{D}}$ that already exists.
+
+\bibliographystyle{unsrtnat}
+\bibliography{references}
+
+\end{document}
